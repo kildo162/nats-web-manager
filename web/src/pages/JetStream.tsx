@@ -72,20 +72,35 @@ export default function JetStream() {
       setStreamInfo(null)
       setConsumers([])
       setSelectedConsumer('')
+      setConsumerInfo(null)
       return
     }
+    // Clear consumer selection immediately to avoid fetching consumer info with mismatched stream
+    setSelectedConsumer('')
+    setConsumerInfo(null)
     ;(async () => {
+      // Fetch stream info
       try {
-        const [si, cs] = await Promise.all([
-          jsStreamInfo(selectedStream),
-          jsConsumers(selectedStream),
-        ])
+        const si = await jsStreamInfo(selectedStream)
         if (!mounted) return
         setStreamInfo(si)
+      } catch (e: any) {
+        if (!mounted) return
+        setStreamInfo(null)
+        setErr(e?.message || 'failed to load stream info')
+      }
+      // Fetch consumers for stream
+      try {
+        const cs = await jsConsumers(selectedStream)
+        if (!mounted) return
         setConsumers(cs)
         if (cs[0]?.name) setSelectedConsumer(cs[0].name)
       } catch (e: any) {
-        setErr(e?.message || 'failed to load stream details')
+        if (!mounted) return
+        setConsumers([])
+        setSelectedConsumer('')
+        setConsumerInfo(null)
+        setErr(e?.message || 'failed to load consumers')
       }
     })()
     return () => { mounted = false }
@@ -100,6 +115,7 @@ export default function JetStream() {
         if (!mounted) return
         setConsumerInfo(ci)
       } catch (e: any) {
+        setConsumerInfo(null)
         setErr(e?.message || 'failed to load consumer info')
       }
     })()
@@ -161,14 +177,15 @@ export default function JetStream() {
     const s = Array.isArray(sRaw) ? [...sRaw].sort((x: any, y: any) => String(x?.config?.name || '').localeCompare(String(y?.config?.name || ''))) : []
     let si: any = null, cs: any[] = [], ci: any = null
     if (selectedStream) {
-      const [siRaw, csRaw] = await Promise.all([
-        jsStreamInfo(selectedStream),
-        jsConsumers(selectedStream),
-      ])
-      si = siRaw
-      cs = Array.isArray(csRaw) ? [...csRaw].sort((x: any, y: any) => String(x?.name || '').localeCompare(String(y?.name || ''))) : []
+      try { si = await jsStreamInfo(selectedStream) } catch {}
+      try {
+        const csRaw = await jsConsumers(selectedStream)
+        cs = Array.isArray(csRaw) ? [...csRaw].sort((x: any, y: any) => String(x?.name || '').localeCompare(String(y?.name || ''))) : []
+      } catch {
+        cs = []
+      }
       if (selectedConsumer) {
-        ci = await jsConsumerInfo(selectedStream, selectedConsumer)
+        try { ci = await jsConsumerInfo(selectedStream, selectedConsumer) } catch { ci = null }
       }
     }
     return { j, a, s, si, cs, ci }
