@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/components/AutoRefreshDialog.tsx","./src/pages/Advisories.tsx","./src/pages/Cluster.tsx","./src/pages/JetStream.tsx","./src/pages/Overview.tsx","./src/pages/PubSub.tsx","./src/pages/Streams.tsx"],"version":"5.9.2"}

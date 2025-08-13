@@ -1,5 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { getConnz, getGatewayz, getLeafz, getRoutez, getSubsz, getVarz } from '../api'
+import AutoRefreshDialog from '../components/AutoRefreshDialog'
 
 export default function Cluster() {
   const [routez, setRoutez] = useState<any>(null)
@@ -10,8 +11,12 @@ export default function Cluster() {
   const [varz, setVarz] = useState<any>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
-  const [auto, setAuto] = useState(true)
-  const [intervalMs] = useState(5000)
+  const [auto, setAuto] = useState<boolean>(() => {
+    try { return localStorage.getItem('auto_refresh') === '1' } catch { return false }
+  })
+  const [intervalMs, setIntervalMs] = useState<number>(() => {
+    try { return Number(localStorage.getItem('refresh_interval_ms') || 5000) } catch { return 5000 }
+  })
   const [sortKey, setSortKey] = useState<'pending_bytes' | 'in_bytes' | 'out_bytes' | 'in_msgs' | 'out_msgs'>('pending_bytes')
   const [limit, setLimit] = useState<number>(10)
   const [connQuery, setConnQuery] = useState('')
@@ -22,6 +27,12 @@ export default function Cluster() {
   const [showGatewayJSON, setShowGatewayJSON] = useState(false)
   const [showLeafJSON, setShowLeafJSON] = useState(false)
   const [showConnJSON, setShowConnJSON] = useState(false)
+  const [inputFocused, setInputFocused] = useState(false)
+  const [panelHovering, setPanelHovering] = useState(false)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [hasPendingUpdate, setHasPendingUpdate] = useState(false)
+  const nextDataRef = useRef<any>(null)
+  const [showRefreshDialog, setShowRefreshDialog] = useState(false)
 
   const accounts = useMemo(() => {
     const arr = Array.isArray(connz?.connections) ? (connz.connections as any[]) : []
@@ -53,25 +64,39 @@ export default function Cluster() {
     }
   }, [connz, sortKey, limit, connQuery, accountFilter])
 
+  const fetchAllData = async () => {
+    const sortParam = sortKey === 'pending_bytes' ? 'pending' : (sortKey as string)
+    const [r, g, l, c, s, v] = await Promise.all([
+      getRoutez(),
+      getGatewayz(),
+      getLeafz(),
+      getConnz({ sort: sortParam, order: -1, limit: Math.max(1, Math.min(1000, limit || 10)) }),
+      getSubsz({}),
+      getVarz({}),
+    ])
+    return { r, g, l, c, s, v }
+  }
+
+  const applyData = (data: any) => {
+    if (!data) return
+    const { r, g, l, c, s, v } = data
+    setRoutez(r)
+    setGatewayz(g)
+    setLeafz(l)
+    setConnz(c)
+    setSubsz(s)
+    setVarz(v)
+    setErr('')
+    setLastUpdated(Date.now())
+    setHasPendingUpdate(false)
+    nextDataRef.current = null
+  }
+
   const loadAll = async () => {
     try {
       setLoading(true)
-      const sortParam = sortKey === 'pending_bytes' ? 'pending' : (sortKey as string)
-      const [r, g, l, c, s, v] = await Promise.all([
-        getRoutez(),
-        getGatewayz(),
-        getLeafz(),
-        getConnz({ sort: sortParam, order: -1, limit: Math.max(1, Math.min(1000, limit || 10)) }),
-        getSubsz({}),
-        getVarz({}),
-      ])
-      setRoutez(r)
-      setGatewayz(g)
-      setLeafz(l)
-      setConnz(c)
-      setSubsz(s)
-      setVarz(v)
-      setErr('')
+      const data = await fetchAllData()
+      applyData(data)
     } catch (e: any) {
       // Clear stale data so user sees immediate change on cluster switch
       setRoutez(null)
@@ -86,14 +111,59 @@ export default function Cluster() {
     }
   }
 
+  const refreshAll = async () => {
+    try {
+      const data = await fetchAllData()
+      applyData(data)
+    } catch (e: any) {
+      setErr(e?.message || 'failed to load cluster info')
+    }
+  }
+
+  const refreshAllDeferred = async () => {
+    try {
+      const data = await fetchAllData()
+      if (document.hidden || inputFocused || panelHovering) {
+        nextDataRef.current = data
+        setHasPendingUpdate(true)
+      } else {
+        applyData(data)
+      }
+    } catch (e: any) {
+      setErr(e?.message || 'failed to load cluster info')
+    }
+  }
+
+  useEffect(() => {
+    try { localStorage.setItem('auto_refresh', auto ? '1' : '0') } catch {}
+  }, [auto])
+
+  useEffect(() => {
+    try { setIntervalMs(Number(localStorage.getItem('refresh_interval_ms') || intervalMs)) } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRefreshDialog])
+
   useEffect(() => {
     let active = true
-    const run = async () => { if (!active) return; await loadAll() }
-    run()
-    let t: any
-    if (auto) t = setInterval(run, intervalMs)
-    return () => { active = false; if (t) clearInterval(t) }
-  }, [auto, intervalMs])
+    const run = async () => { if (!active) return; await refreshAllDeferred() }
+    if (auto) {
+      run()
+      const t = setInterval(run, intervalMs)
+      return () => { active = false; clearInterval(t) }
+    }
+    return () => { active = false }
+  }, [auto, intervalMs, sortKey, limit])
+
+  useEffect(() => {
+    const onVis = () => {
+      if (!document.hidden && hasPendingUpdate) {
+        const data = nextDataRef.current
+        if (data) applyData(data)
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [hasPendingUpdate])
 
   // When sort key or limit changes, refetch connz server-side for correct top-N and order
   useEffect(() => {
@@ -108,11 +178,24 @@ export default function Cluster() {
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Auto refresh (5s)
+            {`Auto refresh (${Math.max(1, Math.round(intervalMs/1000))}s)`}
           </label>
-          <button onClick={() => loadAll()} className="button">Refresh</button>
+          <button onClick={() => refreshAll()} className="button">Refresh</button>
+          <button onClick={() => setShowRefreshDialog(true)} className="button">Settings</button>
+          <div className="ml-2 text-xs text-gray-500">
+            {lastUpdated ? `Last updated: ${new Date(lastUpdated).toLocaleTimeString()}` : 'No updates yet'}
+          </div>
         </div>
       </div>
+      {hasPendingUpdate && (
+        <div className="mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3">
+          <span>New data available</span>
+          <button className="button" onClick={() => { const d = nextDataRef.current; if (d) applyData(d) }}>Apply updates</button>
+        </div>
+      )}
+      <AutoRefreshDialog open={showRefreshDialog} onClose={() => setShowRefreshDialog(false)} onSaved={() => {
+        try { setIntervalMs(Number(localStorage.getItem('refresh_interval_ms') || intervalMs)) } catch {}
+      }} />
       {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
       {loading ? (
         <div className="text-gray-500">Loading cluster info...</div>
@@ -139,10 +222,48 @@ export default function Cluster() {
                 </button>
               </div>
             </div>
-            <SummaryList
-              items={(routez?.routes || []).slice(0, showAllRoutes ? undefined : 10)}
-              label={(r: any) => `${r.remote_id} @ ${r.ip}:${r.port}`}
-            />
+            {(routez?.routes?.length || 0) ? (
+              <div className="overflow-auto" onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="text-gray-600">
+                      <th className="text-left pr-3">Remote ID</th>
+                      <th className="text-left pr-3">RID</th>
+                      <th className="text-left pr-3">IP</th>
+                      <th className="text-right pr-3">Port</th>
+                      <th className="text-right pr-3">Pending</th>
+                      <th className="text-right pr-3">Subs</th>
+                      <th className="text-right pr-3">Msgs (in/out)</th>
+                      <th className="text-right pr-3">Bytes (in/out)</th>
+                      <th className="text-left pr-3">TLS</th>
+                      <th className="text-left pr-3">Idle</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {((routez?.routes || []).slice(0, showAllRoutes ? undefined : 10)).map((r: any, idx: number) => (
+                      <tr key={`${r?.rid ?? r?.remote_id ?? idx}`}
+                          className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900">
+                        <td className="pr-3">{r?.remote_id ?? '-'}</td>
+                        <td className="pr-3">{r?.rid ?? '-'}</td>
+                        <td className="pr-3">{r?.ip ?? '-'}</td>
+                        <td className="text-right pr-3">{r?.port ?? '-'}</td>
+                        <td className="text-right pr-3">{(() => {
+                          const v = (r?.pending_size ?? r?.pending_bytes)
+                          return v != null ? fmtBytes(v) : '-'
+                        })()}</td>
+                        <td className="text-right pr-3">{r?.subscriptions ?? r?.subs ?? '-'}</td>
+                        <td className="text-right pr-3">{(r?.in_msgs ?? 0)} / {(r?.out_msgs ?? 0)}</td>
+                        <td className="text-right pr-3">{fmtBytes(r?.in_bytes)} / {fmtBytes(r?.out_bytes)}</td>
+                        <td className="pr-3">{tlsSummary(r)}</td>
+                        <td className="pr-3">{fmtIdle(r?.idle)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="text-gray-500">No routes</div>
+            )}
             {showRoutesJSON && <Pre obj={routez} />}
           </Section>
           <Section title="Gateways">
@@ -170,7 +291,7 @@ export default function Cluster() {
             <div className="flex items-center gap-3 mb-2 text-sm flex-wrap">
               <label className="flex items-center gap-2">
                 <span className="text-gray-600">Sort</span>
-                <select className="input" value={sortKey} onChange={(e) => setSortKey(e.target.value as any)}>
+                <select className="input" value={sortKey} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} onChange={(e) => setSortKey(e.target.value as any)}>
                   <option value="pending_bytes">pending_bytes</option>
                   <option value="in_msgs">in_msgs</option>
                   <option value="out_msgs">out_msgs</option>
@@ -180,15 +301,15 @@ export default function Cluster() {
               </label>
               <label className="flex items-center gap-2">
                 <span className="text-gray-600">Limit</span>
-                <input className="input w-20" type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(Number(e.target.value))} />
+                <input className="input w-20" type="number" min={1} max={100} value={limit} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} onChange={(e) => setLimit(Number(e.target.value))} />
               </label>
               <label className="flex items-center gap-2">
                 <span className="text-gray-600">Search</span>
-                <input className="input w-48" placeholder="name/ip/account" value={connQuery} onChange={(e) => setConnQuery(e.target.value)} />
+                <input className="input w-48" placeholder="name/ip/account" value={connQuery} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} onChange={(e) => setConnQuery(e.target.value)} />
               </label>
               <label className="flex items-center gap-2">
                 <span className="text-gray-600">Account</span>
-                <select className="input" value={accountFilter} onChange={(e) => setAccountFilter(e.target.value)}>
+                <select className="input" value={accountFilter} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} onChange={(e) => setAccountFilter(e.target.value)}>
                   <option value="">All</option>
                   {accounts.map((a) => (
                     <option key={a} value={a}>{a}</option>
@@ -197,7 +318,7 @@ export default function Cluster() {
               </label>
             </div>
             {hotConns?.length ? (
-              <div className="overflow-auto">
+              <div className="overflow-auto" onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
                 <table className="min-w-full text-sm">
                   <thead>
                     <tr className="text-gray-600">

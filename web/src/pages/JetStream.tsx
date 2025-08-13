@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { getJsz, jsInfo, jsStreams, jsStreamInfo, jsConsumers, jsConsumerInfo } from '../api'
 
 export default function JetStream() {
@@ -12,7 +12,9 @@ export default function JetStream() {
   const [consumerInfo, setConsumerInfo] = useState<any>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
-  const [auto, setAuto] = useState(true)
+  const [auto, setAuto] = useState(() => {
+    try { return localStorage.getItem('js_auto') === '1' } catch { return false }
+  })
   const [intervalMs] = useState(5000)
   const [streamQuery, setStreamQuery] = useState('')
   const [showJszJSON, setShowJszJSON] = useState(false)
@@ -20,6 +22,19 @@ export default function JetStream() {
   const [showStreamJSON, setShowStreamJSON] = useState(false)
   const [showConsumerJSON, setShowConsumerJSON] = useState(false)
   const [consumerQuery, setConsumerQuery] = useState('')
+
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [inputFocused, setInputFocused] = useState(false)
+  const [panelHovering, setPanelHovering] = useState(false)
+  const [hasPendingUpdate, setHasPendingUpdate] = useState(false)
+  const nextDataRef = useRef<any>(null)
+  const isInteracting = useMemo(() => {
+    return inputFocused || panelHovering || showJszJSON || showAcctJSON || showStreamJSON || showConsumerJSON
+  }, [inputFocused, panelHovering, showJszJSON, showAcctJSON, showStreamJSON, showConsumerJSON])
+
+  useEffect(() => {
+    try { localStorage.setItem('js_auto', auto ? '1' : '0') } catch {}
+  }, [auto])
 
   useEffect(() => {
     let mounted = true
@@ -136,43 +151,95 @@ export default function JetStream() {
     }
   }
 
-  // Unified refresh function used by manual button and interval
+  // Fetch all data (without committing to state)
+  const fetchAllData = async () => {
+    const [j, a, sRaw] = await Promise.all([
+      getJsz({ consolidated: true, account: true, config: true, streams: true, consumers: true }),
+      jsInfo(),
+      jsStreams(),
+    ])
+    const s = Array.isArray(sRaw) ? [...sRaw].sort((x: any, y: any) => String(x?.config?.name || '').localeCompare(String(y?.config?.name || ''))) : []
+    let si: any = null, cs: any[] = [], ci: any = null
+    if (selectedStream) {
+      const [siRaw, csRaw] = await Promise.all([
+        jsStreamInfo(selectedStream),
+        jsConsumers(selectedStream),
+      ])
+      si = siRaw
+      cs = Array.isArray(csRaw) ? [...csRaw].sort((x: any, y: any) => String(x?.name || '').localeCompare(String(y?.name || ''))) : []
+      if (selectedConsumer) {
+        ci = await jsConsumerInfo(selectedStream, selectedConsumer)
+      }
+    }
+    return { j, a, s, si, cs, ci }
+  }
+
+  const applyData = (data: any) => {
+    if (!data) return
+    setJsz(data.j)
+    setAcct(data.a)
+    setStreams(data.s)
+    if (selectedStream) {
+      setStreamInfo(data.si)
+      setConsumers(data.cs)
+      if (selectedConsumer) setConsumerInfo(data.ci)
+    }
+    setLastUpdated(Date.now())
+    setHasPendingUpdate(false)
+    nextDataRef.current = null
+  }
+
+  // Manual refresh: always apply
   const refreshAll = async () => {
     try {
-      const [j, a, s] = await Promise.all([
-        getJsz({ consolidated: true, account: true, config: true, streams: true, consumers: true }),
-        jsInfo(),
-        jsStreams(),
-      ])
-      setJsz(j)
-      setAcct(a)
-      setStreams(s)
-      if (selectedStream) {
-        const [si, cs] = await Promise.all([
-          jsStreamInfo(selectedStream),
-          jsConsumers(selectedStream),
-        ])
-        setStreamInfo(si)
-        setConsumers(cs)
-        if (selectedConsumer) {
-          const ci = await jsConsumerInfo(selectedStream, selectedConsumer)
-          setConsumerInfo(ci)
-        }
+      const data = await fetchAllData()
+      applyData(data)
+    } catch (e: any) {
+      setErr(e?.message || 'failed to refresh JetStream info')
+    }
+  }
+
+  // Auto refresh: defer if interacting or tab hidden
+  const refreshAllDeferred = async () => {
+    try {
+      const data = await fetchAllData()
+      if (document.hidden || isInteracting) {
+        nextDataRef.current = data
+        setHasPendingUpdate(true)
+      } else {
+        applyData(data)
       }
     } catch (e: any) {
       setErr(e?.message || 'failed to refresh JetStream info')
     }
   }
 
-  // Periodic refresh (top-level JSZ/account/streams and selected details)
+  const applyPendingUpdates = () => {
+    if (nextDataRef.current) applyData(nextDataRef.current)
+  }
+
+  // Periodic refresh (deferred when interacting/hidden)
   useEffect(() => {
     let active = true
-    const run = async () => { if (!active) return; await refreshAll() }
-    run()
+    const run = async () => { if (!active) return; await refreshAllDeferred() }
     let t: any
-    if (auto) t = setInterval(run, intervalMs)
+    if (auto) {
+      run()
+      t = setInterval(run, intervalMs)
+    }
     return () => { active = false; if (t) clearInterval(t) }
-  }, [auto, intervalMs, selectedStream, selectedConsumer])
+  }, [auto, intervalMs, selectedStream, selectedConsumer, isInteracting])
+
+  // Apply pending when tab becomes visible and user not interacting
+  useEffect(() => {
+    const onVis = () => {
+      if (!document.hidden && hasPendingUpdate && !isInteracting) {
+        applyPendingUpdates()
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [hasPendingUpdate, isInteracting])
 
   return (
     <div>
@@ -183,16 +250,26 @@ export default function JetStream() {
           Auto refresh (5s)
         </label>
         <button onClick={() => { refreshAll() }} className="button">Refresh</button>
+        <div className="ml-auto text-xs text-gray-500">
+          {lastUpdated ? `Cập nhật lần cuối: ${new Date(lastUpdated).toLocaleTimeString()}` : 'Chưa có cập nhật'}
+        </div>
       </div>
       {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
       {loading ? (
         <div className="text-gray-500">Loading JetStream info...</div>
       ) : (
-        <div className="grid grid-cols-[280px_1fr_1fr] gap-3">
+        <>
+          {hasPendingUpdate && (
+            <div className="mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3">
+              <span>Có dữ liệu mới</span>
+              <button className="button" onClick={applyPendingUpdates}>Cập nhật</button>
+            </div>
+          )}
+          <div className="grid grid-cols-[340px_1fr_1fr] gap-3">
           <div>
             <Section title="Streams">
               <div className="mb-2 flex items-center gap-2">
-                <input className="input w-full" placeholder="Search by name or subject..." value={streamQuery} onChange={(e) => setStreamQuery(e.target.value)} />
+                <input className="input w-full" placeholder="Search by name or subject..." value={streamQuery} onChange={(e) => setStreamQuery(e.target.value)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} />
               </div>
               <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
                 {filteredStreams.map((s) => {
@@ -231,7 +308,7 @@ export default function JetStream() {
               <Section title="Consumers">
                 {(consumers.length > 10) && (
                   <div className="mb-2 flex items-center gap-2">
-                    <input className="input w-full" placeholder="Search consumers..." value={consumerQuery} onChange={(e) => setConsumerQuery(e.target.value)} />
+                    <input className="input w-full" placeholder="Search consumers..." value={consumerQuery} onChange={(e) => setConsumerQuery(e.target.value)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} />
                   </div>
                 )}
                 <div className="max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
@@ -248,7 +325,7 @@ export default function JetStream() {
             )}
           </div>
 
-          <div>
+          <div onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
             {streamInfo && (
               <Section title="Stream Health" sticky>
                 <KeyVals
@@ -413,7 +490,7 @@ export default function JetStream() {
 
             </div>
 
-            <div>
+            <div onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
             {consumerInfo && (
               <Section title={`Consumer: ${selectedConsumer}`}>
                 {(() => {
@@ -514,7 +591,8 @@ export default function JetStream() {
               {showAcctJSON && <div className="mt-2"><Pre obj={acct} /></div>}
             </Section>
           </div>
-        </div>
+          </div>
+        </>
       )}
     </div>
   )

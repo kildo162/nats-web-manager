@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
+import AutoRefreshDialog from '../components/AutoRefreshDialog'
 import { getRtt, getVarz, jsInfo } from '../api'
 
 export default function Overview() {
@@ -6,81 +7,134 @@ export default function Overview() {
   const [info, setInfo] = useState<any>(null)
   const [rtt, setRtt] = useState<number | null>(null)
   const [err, setErr] = useState<string>('')
-  const [auto, setAuto] = useState(true)
-  const [intervalMs] = useState(5000)
+  const [auto, setAuto] = useState<boolean>(() => {
+    try { return localStorage.getItem('auto_refresh') === '1' } catch { return false }
+  })
+  const [intervalMs, setIntervalMs] = useState<number>(() => {
+    try { return Number(localStorage.getItem('refresh_interval_ms') || 5000) } catch { return 5000 }
+  })
   const prevRef = useRef<{ t: number, in_msgs: number, out_msgs: number, in_bytes: number, out_bytes: number } | null>(null)
   const [rates, setRates] = useState<{ inMsgs: number, outMsgs: number, inBytes: number, outBytes: number }>({ inMsgs: 0, outMsgs: 0, inBytes: 0, outBytes: 0 })
   const rttHistRef = useRef<number[]>([])
   const [rttStats, setRttStats] = useState<{ min: number, avg: number, max: number } | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null)
+  const [hasPendingUpdate, setHasPendingUpdate] = useState(false)
+  const nextDataRef = useRef<any>(null)
+  const [showRefreshDialog, setShowRefreshDialog] = useState(false)
 
-  const loadAll = async () => {
+  const fetchAllData = async () => {
+    const [v, i, r] = await Promise.all([
+      getVarz(),
+      jsInfo().catch(() => null),
+      getRtt().catch(() => ({ rttMs: null })),
+    ])
+    const rttVal = r?.rttMs ?? null
+    return { v, i, rttVal }
+  }
+
+  const applyData = (data: any) => {
+    if (!data) return
+    const { v, i, rttVal } = data
+    setVarz(v)
+    setInfo(i)
+    setRtt(rttVal)
+    // RTT stats
     try {
-      const [v, i, r] = await Promise.all([
-        getVarz(),
-        jsInfo().catch(() => null),
-        getRtt().catch(() => ({ rttMs: null })),
-      ])
-      setVarz(v)
-      setInfo(i)
-      const rttVal = r?.rttMs ?? null
-      setRtt(rttVal)
-      // keep short history of RTT to show min/avg/max
-      try {
-        if (typeof rttVal === 'number' && isFinite(rttVal)) {
-          const hist = rttHistRef.current
-          hist.push(rttVal)
-          if (hist.length > 12) hist.shift()
-          const min = Math.min(...hist)
-          const max = Math.max(...hist)
-          const avg = hist.reduce((a, b) => a + b, 0) / hist.length
-          setRttStats({ min, avg, max })
-        }
-      } catch {}
-      // compute throughput rates
-      try {
-        const now = Date.now()
-        const pm = Number(v?.in_msgs ?? 0)
-        const om = Number(v?.out_msgs ?? 0)
-        const pb = Number(v?.in_bytes ?? 0)
-        const ob = Number(v?.out_bytes ?? 0)
-        const prev = prevRef.current
-        if (prev && now > prev.t) {
-          const dt = (now - prev.t) / 1000
-          const dInM = Math.max(0, pm - prev.in_msgs)
-          const dOutM = Math.max(0, om - prev.out_msgs)
-          const dInB = Math.max(0, pb - prev.in_bytes)
-          const dOutB = Math.max(0, ob - prev.out_bytes)
-          setRates({
-            inMsgs: dInM / dt,
-            outMsgs: dOutM / dt,
-            inBytes: dInB / dt,
-            outBytes: dOutB / dt,
-          })
-        }
-        prevRef.current = { t: now, in_msgs: pm, out_msgs: om, in_bytes: pb, out_bytes: ob }
-      } catch {}
-      setErr('')
+      if (typeof rttVal === 'number' && isFinite(rttVal)) {
+        const hist = rttHistRef.current
+        hist.push(rttVal)
+        if (hist.length > 12) hist.shift()
+        const min = Math.min(...hist)
+        const max = Math.max(...hist)
+        const avg = hist.reduce((a, b) => a + b, 0) / hist.length
+        setRttStats({ min, avg, max })
+      }
+    } catch {}
+    // throughput rates
+    try {
+      const now = Date.now()
+      const pm = Number(v?.in_msgs ?? 0)
+      const om = Number(v?.out_msgs ?? 0)
+      const pb = Number(v?.in_bytes ?? 0)
+      const ob = Number(v?.out_bytes ?? 0)
+      const prev = prevRef.current
+      if (prev && now > prev.t) {
+        const dt = (now - prev.t) / 1000
+        const dInM = Math.max(0, pm - prev.in_msgs)
+        const dOutM = Math.max(0, om - prev.out_msgs)
+        const dInB = Math.max(0, pb - prev.in_bytes)
+        const dOutB = Math.max(0, ob - prev.out_bytes)
+        setRates({
+          inMsgs: dInM / dt,
+          outMsgs: dOutM / dt,
+          inBytes: dInB / dt,
+          outBytes: dOutB / dt,
+        })
+      }
+      prevRef.current = { t: now, in_msgs: pm, out_msgs: om, in_bytes: pb, out_bytes: ob }
+    } catch {}
+    setLastUpdated(Date.now())
+    setHasPendingUpdate(false)
+    nextDataRef.current = null
+    setErr('')
+  }
+
+  const refreshAll = async () => {
+    try {
+      const data = await fetchAllData()
+      applyData(data)
     } catch (e: any) {
-      // Clear stale data so user sees immediate change on cluster switch
-      setVarz(null)
-      setInfo(null)
-      setRtt(null)
-      prevRef.current = null
-      setRates({ inMsgs: 0, outMsgs: 0, inBytes: 0, outBytes: 0 })
-      rttHistRef.current = []
-      setRttStats(null)
+      setErr(e?.message || 'failed to load')
+    }
+  }
+
+  const refreshAllDeferred = async () => {
+    try {
+      const data = await fetchAllData()
+      if (document.hidden) {
+        nextDataRef.current = data
+        setHasPendingUpdate(true)
+      } else {
+        applyData(data)
+      }
+    } catch (e: any) {
       setErr(e?.message || 'failed to load')
     }
   }
 
   useEffect(() => {
+    try { localStorage.setItem('auto_refresh', auto ? '1' : '0') } catch {}
+  }, [auto])
+
+  useEffect(() => {
+    try { setIntervalMs(Number(localStorage.getItem('refresh_interval_ms') || intervalMs)) } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showRefreshDialog])
+
+  useEffect(() => {
     let active = true
-    const run = async () => { if (!active) return; await loadAll() }
-    run()
-    let t: any
-    if (auto) t = setInterval(run, intervalMs)
-    return () => { active = false; if (t) clearInterval(t) }
+    const run = async () => { if (!active) return; await refreshAllDeferred() }
+    if (auto) {
+      run()
+      const t = setInterval(run, intervalMs)
+      return () => { active = false; clearInterval(t) }
+    }
+    return () => { active = false }
   }, [auto, intervalMs])
+
+  // initial load once on mount
+  useEffect(() => { refreshAll() }, [])
+
+  useEffect(() => {
+    const onVis = () => {
+      if (!document.hidden && hasPendingUpdate) {
+        const data = nextDataRef.current
+        if (data) applyData(data)
+      }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [hasPendingUpdate])
 
   return (
     <div>
@@ -89,11 +143,24 @@ export default function Overview() {
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
-            Auto refresh (5s)
+            {`Auto refresh (${Math.max(1, Math.round(intervalMs/1000))}s)`}
           </label>
-          <button onClick={() => loadAll()} className="button">Refresh</button>
+          <button onClick={() => refreshAll()} className="button">Refresh</button>
+          <button onClick={() => setShowRefreshDialog(true)} className="button">Settings</button>
+          <div className="ml-2 text-xs text-gray-500">
+            {lastUpdated ? `Last updated: ${new Date(lastUpdated).toLocaleTimeString()}` : 'No updates yet'}
+          </div>
         </div>
       </div>
+      {hasPendingUpdate && (
+        <div className="mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3">
+          <span>New data available</span>
+          <button className="button" onClick={() => { const d = nextDataRef.current; if (d) applyData(d) }}>Apply updates</button>
+        </div>
+      )}
+      <AutoRefreshDialog open={showRefreshDialog} onClose={() => setShowRefreshDialog(false)} onSaved={() => {
+        try { setIntervalMs(Number(localStorage.getItem('refresh_interval_ms') || intervalMs)) } catch {}
+      }} />
       {err && <div className="text-red-600 text-sm mb-2">{err}</div>}
       <section>
         <h3 className="text-base font-medium text-gray-700 mb-2">Server (varz)</h3>
