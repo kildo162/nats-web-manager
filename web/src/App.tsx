@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Overview from './pages/Overview'
 import PubSub from './pages/PubSub'
-import Streams from './pages/Streams'
 import Cluster from './pages/Cluster'
 import JetStream from './pages/JetStream'
 import Advisories from './pages/Advisories'
@@ -10,7 +9,6 @@ import { getClusters, getRtt, getVarz, setCluster as apiSetCluster } from './api
 const tabs = [
   { key: 'overview', label: 'Overview' },
   { key: 'pubsub', label: 'Pub/Sub' },
-  { key: 'streams', label: 'Streams' },
   { key: 'cluster', label: 'Cluster' },
   { key: 'jetstream', label: 'JetStream' },
   { key: 'advisories', label: 'Advisories' },
@@ -205,7 +203,6 @@ export default function App() {
       <main key={cluster} className="container-px py-6">
         {tab === 'overview' && <Overview />}
         {tab === 'pubsub' && <PubSub />}
-        {tab === 'streams' && <Streams />}
         {tab === 'cluster' && <Cluster />}
         {tab === 'jetstream' && <JetStream />}
         {tab === 'advisories' && <Advisories />}

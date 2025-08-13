@@ -14,6 +14,12 @@ export default function JetStream() {
   const [loading, setLoading] = useState(true)
   const [auto, setAuto] = useState(true)
   const [intervalMs] = useState(5000)
+  const [streamQuery, setStreamQuery] = useState('')
+  const [showJszJSON, setShowJszJSON] = useState(false)
+  const [showAcctJSON, setShowAcctJSON] = useState(false)
+  const [showStreamJSON, setShowStreamJSON] = useState(false)
+  const [showConsumerJSON, setShowConsumerJSON] = useState(false)
+  const [consumerQuery, setConsumerQuery] = useState('')
 
   useEffect(() => {
     let mounted = true
@@ -86,6 +92,49 @@ export default function JetStream() {
   }, [selectedStream, selectedConsumer])
 
   const jsCluster = useMemo(() => jsz?.jetstream || jsz?.data || jsz, [jsz])
+  const filteredStreams = useMemo(() => {
+    const q = streamQuery.trim().toLowerCase()
+    if (!q) return streams
+    try {
+      return streams.filter((s: any) => {
+        const name = String(s?.config?.name || '').toLowerCase()
+        const subjects = (s?.config?.subjects || []).map((x: string) => String(x).toLowerCase())
+        return name.includes(q) || subjects.some((x: string) => x.includes(q))
+      })
+    } catch {
+      return streams
+    }
+  }, [streams, streamQuery])
+
+  const filteredConsumers = useMemo(() => {
+    const q = consumerQuery.trim().toLowerCase()
+    if (!q) return consumers
+    try {
+      return consumers.filter((c: any) => String(c?.name || '').toLowerCase().includes(q))
+    } catch {
+      return consumers
+    }
+  }, [consumers, consumerQuery])
+
+  function streamStatus(s: any): { label: 'active' | 'warning' | 'error'; className: string } {
+    try {
+      const used = Number(s?.state?.bytes || s?.state?.bytes_used || 0)
+      const maxb = Number(s?.config?.max_bytes || 0)
+      let status: 'active' | 'warning' | 'error' = 'active'
+      if (isFinite(used) && used > 0 && isFinite(maxb) && maxb > 0) {
+        const pct = (used / maxb) * 100
+        if (pct >= 90) status = 'error'
+        else if (pct >= 75) status = 'warning'
+      }
+      if (!s?.cluster?.leader) status = 'error'
+      return {
+        label: status,
+        className: status === 'error' ? 'bg-red-500' : status === 'warning' ? 'bg-yellow-500' : 'bg-green-600'
+      }
+    } catch {
+      return { label: 'active', className: 'bg-green-600' }
+    }
+  }
 
   // Unified refresh function used by manual button and interval
   const refreshAll = async () => {
@@ -139,23 +188,69 @@ export default function JetStream() {
       {loading ? (
         <div className="text-gray-500">Loading JetStream info...</div>
       ) : (
-        <div className="grid grid-cols-[280px_1fr] gap-3">
+        <div className="grid grid-cols-[280px_1fr_1fr] gap-3">
           <div>
             <Section title="Streams">
+              <div className="mb-2 flex items-center gap-2">
+                <input className="input w-full" placeholder="Search by name or subject..." value={streamQuery} onChange={(e) => setStreamQuery(e.target.value)} />
+              </div>
               <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
-                {streams.map((s) => (
-                  <div
-                    key={s.config.name}
-                    onClick={() => setSelectedStream(s.config.name)}
-                    className={`px-3 py-2 cursor-pointer ${selectedStream === s.config.name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
-                  >{s.config.name}</div>
-                ))}
-                {streams.length === 0 && <div className="p-3 text-gray-500">No streams</div>}
+                {filteredStreams.map((s) => {
+                  const cfg = s?.config || {}
+                  const name = cfg.name
+                  const storage = cfg.storage
+                  const replicas = cfg.num_replicas
+                  const retention = cfg.retention
+                  const subjectsCount = Array.isArray(cfg.subjects) ? cfg.subjects.length : 0
+                  const st = streamStatus(s)
+                  return (
+                    <div
+                      key={name}
+                      onClick={() => setSelectedStream(name)}
+                      className={`px-3 py-2 cursor-pointer ${selectedStream === name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
+                    >
+                      <div className="font-medium flex items-center gap-2">
+                        <span className={`inline-block w-2.5 h-2.5 rounded-full ${st.className}`} title={`Status: ${st.label}`}></span>
+                        <span>{name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-700" title={`Status: ${st.label}`}>{st.label}</span>
+                      </div>
+                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-700 flex-wrap">
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">storage: {String(storage || '-')}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">replicas: {String(replicas || 1)}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">retention: {String(retention || '-')}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">subjects: {subjectsCount}</span>
+                      </div>
+                    </div>
+                  )
+                })}
+                {filteredStreams.length === 0 && <div className="p-3 text-gray-500">No streams</div>}
               </div>
             </Section>
 
             {streamInfo && (
-              <Section title="Stream Health">
+              <Section title="Consumers">
+                {(consumers.length > 10) && (
+                  <div className="mb-2 flex items-center gap-2">
+                    <input className="input w-full" placeholder="Search consumers..." value={consumerQuery} onChange={(e) => setConsumerQuery(e.target.value)} />
+                  </div>
+                )}
+                <div className="max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
+                  {filteredConsumers.map((c) => (
+                    <div
+                      key={c.name}
+                      onClick={() => setSelectedConsumer(c.name)}
+                      className={`px-3 py-1.5 cursor-pointer ${selectedConsumer === c.name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
+                    >{c.name}</div>
+                  ))}
+                  {filteredConsumers.length === 0 && <div className="p-3 text-gray-500">No consumers</div>}
+                </div>
+              </Section>
+            )}
+          </div>
+
+          <div>
+            {streamInfo && (
+              <Section title="Stream Health" sticky>
                 <KeyVals
                   items={[
                     ['Name', streamInfo?.config?.name],
@@ -169,7 +264,44 @@ export default function JetStream() {
                     ['First Seq', streamInfo?.state?.first_seq],
                     ['Last Seq', streamInfo?.state?.last_seq],
                   ]}
+                  tips={{
+                    'Name': 'Stream name',
+                    'Storage': 'Where messages are stored: file or memory.',
+                    'Replicas': 'Number of stream replicas in the cluster.',
+                    'Leader': 'Server currently leading this stream.',
+                    'Bytes Used': 'Current storage used by this stream.',
+                    'Max Bytes': 'Configured storage limit for this stream.',
+                    'Utilization': 'Bytes used divided by max bytes.',
+                    'Msgs': 'Total messages stored in this stream.',
+                    'First Seq': 'First sequence number in the stream.',
+                    'Last Seq': 'Last sequence number in the stream.'
+                  }}
+                  links={{
+                    'Storage': 'https://docs.nats.io/using-nats/jetstream',
+                    'Replicas': 'https://docs.nats.io/using-nats/jetstream',
+                    'Leader': 'https://docs.nats.io/using-nats/jetstream',
+                    'Max Bytes': 'https://docs.nats.io/using-nats/jetstream',
+                    'Utilization': 'https://docs.nats.io/using-nats/jetstream'
+                  }}
                 />
+                {(() => {
+                  const used = Number(streamInfo?.state?.bytes || 0)
+                  const maxb = Number(streamInfo?.config?.max_bytes || 0)
+                  if (!(isFinite(used) && isFinite(maxb) && maxb > 0)) return null
+                  const pct = Math.min(100, Math.max(0, (used / maxb) * 100))
+                  const bar = pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-yellow-500' : 'bg-green-600'
+                  return (
+                    <div className="mt-2">
+                      <div className="flex items-center justify-between text-sm text-gray-700 mb-1">
+                        <div>Storage utilization</div>
+                        <div>{pct.toFixed(1)}%</div>
+                      </div>
+                      <div className="h-2 w-full bg-gray-200 dark:bg-gray-800 rounded">
+                        <div className={`h-2 ${bar} rounded`} style={{ width: pct + '%' }} />
+                      </div>
+                    </div>
+                  )
+                })()}
                 {Array.isArray(streamInfo?.cluster?.replicas) && streamInfo.cluster.replicas.length > 0 && (
                   <div className="mt-2">
                     <div className="font-medium text-gray-700 mb-1">Replicas</div>
@@ -199,22 +331,150 @@ export default function JetStream() {
             )}
 
             {streamInfo && (
-              <Section title="Consumers">
-                <div className="max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
-                  {consumers.map((c) => (
-                    <div
-                      key={c.name}
-                      onClick={() => setSelectedConsumer(c.name)}
-                      className={`px-3 py-1.5 cursor-pointer ${selectedConsumer === c.name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
-                    >{c.name}</div>
-                  ))}
-                  {consumers.length === 0 && <div className="p-3 text-gray-500">No consumers</div>}
+              <Section title="Stream Config">
+                <KeyVals
+                  items={[
+                    ['Retention', streamInfo?.config?.retention],
+                    ['Discard', streamInfo?.config?.discard],
+                    ['Max Msgs', streamInfo?.config?.max_msgs],
+                    ['Max Bytes', fmtBytes(streamInfo?.config?.max_bytes)],
+                    ['Max Age', fmtDurationNs(streamInfo?.config?.max_age)],
+                    ['Dedupe Window', fmtDurationNs(streamInfo?.config?.duplicate_window)],
+                    ['Replicas', streamInfo?.config?.num_replicas],
+                    ['Subjects', Array.isArray(streamInfo?.config?.subjects) ? streamInfo.config.subjects.length : 0],
+                    ['Sealed', String(streamInfo?.config?.sealed ?? false)],
+                    ['Deny Purge', String(streamInfo?.config?.deny_purge ?? false)],
+                    ['Deny Delete', String(streamInfo?.config?.deny_delete ?? false)],
+                    ['Mirror', streamInfo?.config?.mirror?.name || '-'],
+                    ['Sources', Array.isArray(streamInfo?.config?.sources) ? streamInfo.config.sources.length : 0],
+                  ]}
+                  tips={{
+                    'Retention': 'Policy that controls when messages are removed from the stream.',
+                    'Discard': 'Policy for discarding messages when limits are hit.',
+                    'Max Msgs': 'Maximum number of messages allowed.',
+                    'Max Bytes': 'Maximum bytes allowed for storage.',
+                    'Max Age': 'Maximum age before messages expire.',
+                    'Dedupe Window': 'Time window for de-duplicating messages.',
+                    'Replicas': 'Number of replicas configured for this stream.',
+                    'Subjects': 'Number of subjects attached to this stream.',
+                    'Sealed': 'Sealed streams disallow further changes.',
+                    'Deny Purge': 'Prevent purge operations.',
+                    'Deny Delete': 'Prevent delete operations.',
+                    'Mirror': 'Upstream stream mirrored into this stream.',
+                    'Sources': 'Number of source streams feeding into this stream.'
+                  }}
+                  links={{
+                    'Retention': 'https://docs.nats.io/using-nats/jetstream',
+                    'Discard': 'https://docs.nats.io/using-nats/jetstream',
+                    'Max Msgs': 'https://docs.nats.io/using-nats/jetstream',
+                    'Max Bytes': 'https://docs.nats.io/using-nats/jetstream',
+                    'Max Age': 'https://docs.nats.io/using-nats/jetstream',
+                    'Dedupe Window': 'https://docs.nats.io/using-nats/jetstream',
+                    'Replicas': 'https://docs.nats.io/using-nats/jetstream',
+                    'Sealed': 'https://docs.nats.io/using-nats/jetstream',
+                    'Deny Purge': 'https://docs.nats.io/using-nats/jetstream',
+                    'Deny Delete': 'https://docs.nats.io/using-nats/jetstream',
+                    'Mirror': 'https://docs.nats.io/using-nats/jetstream',
+                    'Sources': 'https://docs.nats.io/using-nats/jetstream'
+                  }}
+                />
+                <div className="mt-2">
+                  <button className="button" onClick={() => setShowStreamJSON(v => !v)}>{showStreamJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                  {showStreamJSON && <div className="mt-2"><Pre obj={streamInfo} /></div>}
                 </div>
               </Section>
             )}
-          </div>
 
-          <div>
+            {streamInfo && (
+              <Section title="Alerts">
+                <ul className="list-disc pl-5 text-sm text-gray-800 space-y-1">
+                  {(() => {
+                    const alerts: string[] = []
+                    const used = Number(streamInfo?.state?.bytes || 0)
+                    const maxb = Number(streamInfo?.config?.max_bytes || 0)
+                    if (isFinite(used) && used > 0 && isFinite(maxb) && maxb > 0) {
+                      const pct = (used / maxb) * 100
+                      if (pct >= 90) alerts.push(`High storage utilization: ${pct.toFixed(1)}%`)
+                      else if (pct >= 75) alerts.push(`Storage utilization warning: ${pct.toFixed(1)}%`)
+                    }
+                    if (!streamInfo?.cluster?.leader) alerts.push('No stream leader')
+                    const reps: any[] = Array.isArray(streamInfo?.cluster?.replicas) ? streamInfo.cluster.replicas : []
+                    reps.forEach((r: any) => {
+                      if (!r.current) alerts.push(`Replica not current: ${r.name}`)
+                      if (Number(r.lag || 0) > 0) alerts.push(`Replica lag: ${r.name} lag=${r.lag}`)
+                    })
+                    const consumers = Number(streamInfo?.state?.consumers || 0)
+                    if (consumers === 0) alerts.push('No consumers on this stream')
+                    return alerts.length ? alerts.map((a, i) => <li key={i}>{a}</li>) : <li>No alerts</li>
+                  })()}
+                </ul>
+              </Section>
+            )}
+
+            </div>
+
+            <div>
+            {consumerInfo && (
+              <Section title={`Consumer: ${selectedConsumer}`}>
+                {(() => {
+                  const maxAck = Number(consumerInfo?.config?.max_ack_pending || 0)
+                  const ackPending = Number(consumerInfo?.num_ack_pending || 0)
+                  const ackPct = maxAck > 0 ? (ackPending / maxAck) * 100 : null
+                  const redelivered = Number(consumerInfo?.num_redelivered ?? consumerInfo?.num_redeliveries ?? 0)
+                  const inactive = consumerInfo?.inactive_threshold
+                  const ackBadge = ackPct == null ? null : (
+                    <span className={`inline-flex px-2 py-0.5 rounded text-white text-xs ${ackPct >= 80 ? 'bg-red-600' : ackPct >= 50 ? 'bg-yellow-600' : 'bg-green-600'}`}>
+                      ack pending {ackPending}/{maxAck} ({ackPct.toFixed(0)}%)
+                    </span>
+                  )
+                  const redBadge = redelivered > 0 ? (
+                    <span className="inline-flex px-2 py-0.5 rounded bg-orange-600 text-white text-xs">redelivered {redelivered}</span>
+                  ) : null
+                  const inactiveBadge = inactive ? (
+                    <span className="inline-flex px-2 py-0.5 rounded bg-gray-700 text-white text-xs">inactive {inactive}s</span>
+                  ) : null
+                  return (
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {ackBadge}
+                      {redBadge}
+                      {inactiveBadge}
+                    </div>
+                  )
+                })()}
+                <KeyVals
+                  items={[
+                    ['Ack Pending', consumerInfo?.num_ack_pending],
+                    ['Redelivered', consumerInfo?.num_redelivered ?? consumerInfo?.num_redeliveries],
+                    ['Num Pending', consumerInfo?.num_pending],
+                    ['Max Ack Pending', consumerInfo?.config?.max_ack_pending ?? '-'],
+                    ['Inactive (s)', consumerInfo?.inactive_threshold],
+                    ['Ack Policy', consumerInfo?.config?.ack_policy],
+                    ['Replay Policy', consumerInfo?.config?.replay_policy],
+                    ['Deliver Policy', consumerInfo?.config?.deliver_policy],
+                  ]}
+                  tips={{
+                    'Ack Pending': 'Number of messages pending acknowledgment.',
+                    'Redelivered': 'Messages redelivered to this consumer.',
+                    'Num Pending': 'Messages available to be delivered.',
+                    'Max Ack Pending': 'Configured max in-flight messages waiting for ack.',
+                    'Inactive (s)': 'Threshold for consumer inactivity in seconds.',
+                    'Ack Policy': 'How acknowledgements are required.',
+                    'Replay Policy': 'How messages are replayed to this consumer.',
+                    'Deliver Policy': 'Where delivery starts in the stream.'
+                  }}
+                  links={{
+                    'Ack Policy': 'https://docs.nats.io/using-nats/jetstream',
+                    'Replay Policy': 'https://docs.nats.io/using-nats/jetstream',
+                    'Deliver Policy': 'https://docs.nats.io/using-nats/jetstream'
+                  }}
+                />
+                <div className="mt-2">
+                  <button className="button" onClick={() => setShowConsumerJSON(v => !v)}>{showConsumerJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                  {showConsumerJSON && <div className="mt-2"><Pre obj={consumerInfo} /></div>}
+                </div>
+              </Section>
+            )}
+
             <Section title="Cluster">
               <KeyVals
                 items={[
@@ -227,37 +487,32 @@ export default function JetStream() {
                   ['Streams', streams?.length ?? 0],
                   ['Account', acct?.account_id || acct?.tier || '-'],
                 ]}
+                tips={{
+                  'Domain': 'JetStream domain (if configured).',
+                  'Cluster': 'JetStream cluster name.',
+                  'Leader': 'JetStream meta leader.',
+                  'Peers': 'Number of peers in the stream cluster.',
+                  'Meta Leader': 'Leader of the meta cluster.',
+                  'Meta Nodes': 'Number of nodes in the meta cluster.',
+                  'Streams': 'Number of streams in this account.',
+                  'Account': 'Current account context.'
+                }}
+                links={{
+                  'Cluster': 'https://docs.nats.io/using-nats/jetstream',
+                  'Leader': 'https://docs.nats.io/using-nats/jetstream'
+                }}
               />
-              <Pre obj={jsz} />
+              <div className="mt-2">
+                <button className="button" onClick={() => setShowJszJSON(v => !v)}>{showJszJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                {showJszJSON && <div className="mt-2"><Pre obj={jsz} /></div>}
+              </div>
             </Section>
 
             <Section title="Account">
-              <Pre obj={acct} />
+              <div className="mb-2 text-sm text-gray-700">{acct?.account_id || acct?.tier || '-'}</div>
+              <button className="button" onClick={() => setShowAcctJSON(v => !v)}>{showAcctJSON ? 'Hide JSON' : 'Show JSON'}</button>
+              {showAcctJSON && <div className="mt-2"><Pre obj={acct} /></div>}
             </Section>
-
-            {streamInfo && (
-              <Section title={`Stream: ${selectedStream}`}>
-                <Pre obj={streamInfo} />
-              </Section>
-            )}
-
-            {consumerInfo && (
-              <Section title={`Consumer: ${selectedConsumer}`}>
-                <KeyVals
-                  items={[
-                    ['Ack Pending', consumerInfo?.num_ack_pending],
-                    ['Redelivered', consumerInfo?.num_redelivered ?? consumerInfo?.num_redeliveries],
-                    ['Num Pending', consumerInfo?.num_pending],
-                    ['Max Ack Pending', consumerInfo?.config?.max_ack_pending ?? '-'],
-                    ['Inactive (s)', consumerInfo?.inactive_threshold],
-                    ['Ack Policy', consumerInfo?.config?.ack_policy],
-                    ['Replay Policy', consumerInfo?.config?.replay_policy],
-                    ['Deliver Policy', consumerInfo?.config?.deliver_policy],
-                  ]}
-                />
-                <Pre obj={consumerInfo} />
-              </Section>
-            )}
           </div>
         </div>
       )}
@@ -265,23 +520,32 @@ export default function JetStream() {
   )
 }
 
-function Section({ title, children }: { title: string, children: React.ReactNode }) {
+function Section({ title, children, sticky }: { title: string, children: React.ReactNode, sticky?: boolean }) {
   return (
-    <div className="card overflow-hidden mb-3">
-      <div className="px-3 py-2 font-semibold text-gray-800 bg-gray-50 border-b border-gray-200 dark:bg-gray-950 dark:border-gray-800">{title}</div>
+    <div className={`card ${sticky ? '' : 'overflow-hidden'} mb-3`}>
+      <div className={`px-3 py-2 font-semibold text-gray-800 bg-gray-50 border-b border-gray-200 dark:bg-gray-950 dark:border-gray-800 ${sticky ? 'sticky top-0 z-10' : ''}`}>{title}</div>
       <div className="p-3">{children}</div>
     </div>
   )
 }
 
-function KeyVals({ items }: { items: [string, any][] }) {
+function KeyVals({ items, tips, links }: { items: [string, any][], tips?: Record<string, string>, links?: Record<string, string> }) {
   return (
-    <div className="grid grid-cols-[140px_1fr] gap-x-3 gap-y-1.5 mb-2">
+    <div className="grid grid-cols-[160px_1fr] gap-x-3 gap-y-1.5 mb-2">
       {items.map(([k, v]) => (
         <React.Fragment key={k}>
-          <div className="text-gray-600">{k}</div>
-          <div>{String(v ?? '-')} 
+          <div className="text-gray-600 flex items-center gap-1">
+            <span>{k}</span>
+            {(tips?.[k] || links?.[k]) && (
+              <span className="inline-flex items-center gap-1 text-[10px] text-gray-500">
+                {tips?.[k] && <span className="cursor-help" title={tips[k]}>?</span>}
+                {links?.[k] && (
+                  <a href={links[k]} target="_blank" rel="noreferrer" className="underline hover:text-blue-600">docs</a>
+                )}
+              </span>
+            )}
           </div>
+          <div>{String(v ?? '-')}</div>
         </React.Fragment>
       ))}
     </div>
@@ -309,4 +573,18 @@ function fmtPct(used: any, max: any) {
   const m = Number(max || 0)
   if (!isFinite(u) || u <= 0 || !isFinite(m) || m <= 0) return '-'
   return `${((u / m) * 100).toFixed(1)}%`
+}
+
+function fmtDurationNs(x: any) {
+  const n = Number(x || 0)
+  if (!isFinite(n) || n <= 0) return '-'
+  let ms = n / 1e6
+  const parts: string[] = []
+  const add = (v: number, suffix: string) => { if (v > 0) parts.push(`${Math.floor(v)}${suffix}`) }
+  const d = Math.floor(ms / (24 * 3600 * 1000)); ms -= d * 24 * 3600 * 1000
+  const h = Math.floor(ms / (3600 * 1000)); ms -= h * 3600 * 1000
+  const m = Math.floor(ms / (60 * 1000)); ms -= m * 60 * 1000
+  const s = Math.floor(ms / 1000)
+  add(d, 'd'); add(h, 'h'); add(m, 'm'); add(s, 's')
+  return parts.length ? parts.join(' ') : '0s'
 }
