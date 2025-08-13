@@ -22,6 +22,8 @@ export default function JetStream() {
   const [showStreamJSON, setShowStreamJSON] = useState(false)
   const [showConsumerJSON, setShowConsumerJSON] = useState(false)
   const [consumerQuery, setConsumerQuery] = useState('')
+  const [streamSort, setStreamSort] = useState<'name' | 'msgs' | 'bytes' | 'util'>('name')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'warning' | 'error'>('all')
 
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
@@ -136,6 +138,25 @@ export default function JetStream() {
       return streams
     }
   }, [streams, streamQuery])
+
+  const displayStreams = useMemo(() => {
+    let arr = filteredStreams
+    // filter by status
+    if (statusFilter !== 'all') {
+      arr = arr.filter((s: any) => streamStatus(s).label === statusFilter)
+    }
+    // sort
+    const byName = (x: any, y: any) => String(x?.config?.name || '').localeCompare(String(y?.config?.name || ''))
+    const byMsgs = (x: any, y: any) => Number(y?.state?.messages || 0) - Number(x?.state?.messages || 0)
+    const byBytes = (x: any, y: any) => Number(y?.state?.bytes || 0) - Number(x?.state?.bytes || 0)
+    const byUtil = (x: any, y: any) => {
+      const xu = (() => { const u = Number(x?.state?.bytes || 0); const m = Number(x?.config?.max_bytes || 0); return m > 0 ? u / m : 0 })()
+      const yu = (() => { const u = Number(y?.state?.bytes || 0); const m = Number(y?.config?.max_bytes || 0); return m > 0 ? u / m : 0 })()
+      return yu - xu
+    }
+    const cmp = streamSort === 'name' ? byName : streamSort === 'msgs' ? byMsgs : streamSort === 'bytes' ? byBytes : byUtil
+    return [...arr].sort(cmp)
+  }, [filteredStreams, statusFilter, streamSort])
 
   const filteredConsumers = useMemo(() => {
     const q = consumerQuery.trim().toLowerCase()
@@ -288,8 +309,31 @@ export default function JetStream() {
               <div className="mb-2 flex items-center gap-2">
                 <input className="input w-full" placeholder="Search by name or subject..." value={streamQuery} onChange={(e) => setStreamQuery(e.target.value)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} />
               </div>
-              <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
-                {filteredStreams.map((s) => {
+              <div className="mb-2 flex items-center gap-2 text-xs text-gray-600">
+                <div className="ml-auto flex items-center gap-2">
+                  <label className="flex items-center gap-1">
+                    <span>Status</span>
+                    <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)}>
+                      <option value="all">All</option>
+                      <option value="active">Active</option>
+                      <option value="warning">Warning</option>
+                      <option value="error">Error</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <span>Sort</span>
+                    <select className="input" value={streamSort} onChange={(e) => setStreamSort(e.target.value as any)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)}>
+                      <option value="name">Name</option>
+                      <option value="msgs">Messages</option>
+                      <option value="bytes">Bytes</option>
+                      <option value="util">Utilization</option>
+                    </select>
+                  </label>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 mb-1">Streams: {displayStreams.length}</div>
+              <div className="max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg" onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
+                {displayStreams.map((s) => {
                   const cfg = s?.config || {}
                   const name = cfg.name
                   const storage = cfg.storage
@@ -297,27 +341,35 @@ export default function JetStream() {
                   const retention = cfg.retention
                   const subjectsCount = Array.isArray(cfg.subjects) ? cfg.subjects.length : 0
                   const st = streamStatus(s)
+                  const used = Number(s?.state?.bytes || 0)
+                  const maxb = Number(cfg?.max_bytes || 0)
+                  const util = (isFinite(used) && isFinite(maxb) && maxb > 0) ? (used / maxb) * 100 : null
+                  const utilBadge = util == null ? null : (
+                    <span className={`inline-flex px-1.5 py-0.5 rounded text-white text-[10px] ${util >= 90 ? 'bg-red-600' : util >= 75 ? 'bg-yellow-600' : 'bg-green-600'}`}>{util.toFixed(0)}%</span>
+                  )
                   return (
                     <div
                       key={name}
                       onClick={() => setSelectedStream(name)}
-                      className={`px-3 py-2 cursor-pointer ${selectedStream === name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
+                      className={`px-3 py-2 cursor-pointer border-b border-gray-100 dark:border-gray-800 ${selectedStream === name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`}
                     >
                       <div className="font-medium flex items-center gap-2">
                         <span className={`inline-block w-2.5 h-2.5 rounded-full ${st.className}`} title={`Status: ${st.label}`}></span>
                         <span>{name}</span>
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-700" title={`Status: ${st.label}`}>{st.label}</span>
                       </div>
-                      <div className="mt-1 flex items-center gap-2 text-xs text-gray-700 flex-wrap">
-                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">storage: {String(storage || '-')}</span>
-                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">replicas: {String(replicas || 1)}</span>
-                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">retention: {String(retention || '-')}</span>
+                      <div className="mt-1 flex items-center gap-2 text-[11px] text-gray-700 flex-wrap">
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">msgs: {String(s?.state?.messages ?? '-')}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">bytes: {fmtBytes(used)}</span>
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">util: {utilBadge || '-'}</span>
                         <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">subjects: {subjectsCount}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">replicas: {String(replicas || 1)}</span>
+                        <span className="inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900">storage: {String(storage || '-')}</span>
                       </div>
                     </div>
                   )
                 })}
-                {filteredStreams.length === 0 && <div className="p-3 text-gray-500">No streams</div>}
+                {displayStreams.length === 0 && <div className="p-3 text-gray-500">No streams</div>}
               </div>
             </Section>
 

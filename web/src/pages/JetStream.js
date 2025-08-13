@@ -27,6 +27,8 @@ export default function JetStream() {
     const [showStreamJSON, setShowStreamJSON] = useState(false);
     const [showConsumerJSON, setShowConsumerJSON] = useState(false);
     const [consumerQuery, setConsumerQuery] = useState('');
+    const [streamSort, setStreamSort] = useState('name');
+    const [statusFilter, setStatusFilter] = useState('all');
     const [lastUpdated, setLastUpdated] = useState(null);
     const [inputFocused, setInputFocused] = useState(false);
     const [panelHovering, setPanelHovering] = useState(false);
@@ -80,24 +82,42 @@ export default function JetStream() {
             setStreamInfo(null);
             setConsumers([]);
             setSelectedConsumer('');
+            setConsumerInfo(null);
             return;
         }
-        ;
+        // Clear consumer selection immediately to avoid fetching consumer info with mismatched stream
+        setSelectedConsumer('');
+        setConsumerInfo(null);
         (async () => {
+            // Fetch stream info
             try {
-                const [si, cs] = await Promise.all([
-                    jsStreamInfo(selectedStream),
-                    jsConsumers(selectedStream),
-                ]);
+                const si = await jsStreamInfo(selectedStream);
                 if (!mounted)
                     return;
                 setStreamInfo(si);
+            }
+            catch (e) {
+                if (!mounted)
+                    return;
+                setStreamInfo(null);
+                setErr(e?.message || 'failed to load stream info');
+            }
+            // Fetch consumers for stream
+            try {
+                const cs = await jsConsumers(selectedStream);
+                if (!mounted)
+                    return;
                 setConsumers(cs);
                 if (cs[0]?.name)
                     setSelectedConsumer(cs[0].name);
             }
             catch (e) {
-                setErr(e?.message || 'failed to load stream details');
+                if (!mounted)
+                    return;
+                setConsumers([]);
+                setSelectedConsumer('');
+                setConsumerInfo(null);
+                setErr(e?.message || 'failed to load consumers');
             }
         })();
         return () => { mounted = false; };
@@ -117,6 +137,7 @@ export default function JetStream() {
                 setConsumerInfo(ci);
             }
             catch (e) {
+                setConsumerInfo(null);
                 setErr(e?.message || 'failed to load consumer info');
             }
         })();
@@ -138,6 +159,24 @@ export default function JetStream() {
             return streams;
         }
     }, [streams, streamQuery]);
+    const displayStreams = useMemo(() => {
+        let arr = filteredStreams;
+        // filter by status
+        if (statusFilter !== 'all') {
+            arr = arr.filter((s) => streamStatus(s).label === statusFilter);
+        }
+        // sort
+        const byName = (x, y) => String(x?.config?.name || '').localeCompare(String(y?.config?.name || ''));
+        const byMsgs = (x, y) => Number(y?.state?.messages || 0) - Number(x?.state?.messages || 0);
+        const byBytes = (x, y) => Number(y?.state?.bytes || 0) - Number(x?.state?.bytes || 0);
+        const byUtil = (x, y) => {
+            const xu = (() => { const u = Number(x?.state?.bytes || 0); const m = Number(x?.config?.max_bytes || 0); return m > 0 ? u / m : 0; })();
+            const yu = (() => { const u = Number(y?.state?.bytes || 0); const m = Number(y?.config?.max_bytes || 0); return m > 0 ? u / m : 0; })();
+            return yu - xu;
+        };
+        const cmp = streamSort === 'name' ? byName : streamSort === 'msgs' ? byMsgs : streamSort === 'bytes' ? byBytes : byUtil;
+        return [...arr].sort(cmp);
+    }, [filteredStreams, statusFilter, streamSort]);
     const filteredConsumers = useMemo(() => {
         const q = consumerQuery.trim().toLowerCase();
         if (!q)
@@ -182,14 +221,24 @@ export default function JetStream() {
         const s = Array.isArray(sRaw) ? [...sRaw].sort((x, y) => String(x?.config?.name || '').localeCompare(String(y?.config?.name || ''))) : [];
         let si = null, cs = [], ci = null;
         if (selectedStream) {
-            const [siRaw, csRaw] = await Promise.all([
-                jsStreamInfo(selectedStream),
-                jsConsumers(selectedStream),
-            ]);
-            si = siRaw;
-            cs = Array.isArray(csRaw) ? [...csRaw].sort((x, y) => String(x?.name || '').localeCompare(String(y?.name || ''))) : [];
+            try {
+                si = await jsStreamInfo(selectedStream);
+            }
+            catch { }
+            try {
+                const csRaw = await jsConsumers(selectedStream);
+                cs = Array.isArray(csRaw) ? [...csRaw].sort((x, y) => String(x?.name || '').localeCompare(String(y?.name || ''))) : [];
+            }
+            catch {
+                cs = [];
+            }
             if (selectedConsumer) {
-                ci = await jsConsumerInfo(selectedStream, selectedConsumer);
+                try {
+                    ci = await jsConsumerInfo(selectedStream, selectedConsumer);
+                }
+                catch {
+                    ci = null;
+                }
             }
         }
         return { j, a, s, si, cs, ci };
@@ -263,7 +312,7 @@ export default function JetStream() {
         document.addEventListener('visibilitychange', onVis);
         return () => document.removeEventListener('visibilitychange', onVis);
     }, [hasPendingUpdate, isInteracting]);
-    return (_jsxs("div", { children: [_jsx("h2", { className: "text-xl font-semibold text-gray-800 mb-3", children: "JetStream" }), _jsxs("div", { className: "flex items-center gap-3 my-2", children: [_jsxs("label", { className: "inline-flex items-center gap-2 text-sm text-gray-700", children: [_jsx("input", { type: "checkbox", className: "rounded", checked: auto, onChange: (e) => setAuto(e.target.checked) }), "Auto refresh (5s)"] }), _jsx("button", { onClick: () => { refreshAll(); }, className: "button", children: "Refresh" }), _jsx("div", { className: "ml-auto text-xs text-gray-500", children: lastUpdated ? `Cập nhật lần cuối: ${new Date(lastUpdated).toLocaleTimeString()}` : 'Chưa có cập nhật' })] }), err && _jsx("div", { className: "text-red-600 text-sm mb-2", children: err }), loading ? (_jsx("div", { className: "text-gray-500", children: "Loading JetStream info..." })) : (_jsxs(_Fragment, { children: [hasPendingUpdate && (_jsxs("div", { className: "mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3", children: [_jsx("span", { children: "C\u00F3 d\u1EEF li\u1EC7u m\u1EDBi" }), _jsx("button", { className: "button", onClick: applyPendingUpdates, children: "C\u1EADp nh\u1EADt" })] })), _jsxs("div", { className: "grid grid-cols-[340px_1fr_1fr] gap-3", children: [_jsxs("div", { children: [_jsxs(Section, { title: "Streams", children: [_jsx("div", { className: "mb-2 flex items-center gap-2", children: _jsx("input", { className: "input w-full", placeholder: "Search by name or subject...", value: streamQuery, onChange: (e) => setStreamQuery(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false) }) }), _jsxs("div", { className: "max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg", children: [filteredStreams.map((s) => {
+    return (_jsxs("div", { children: [_jsx("h2", { className: "text-xl font-semibold text-gray-800 mb-3", children: "JetStream" }), _jsxs("div", { className: "flex items-center gap-3 my-2", children: [_jsxs("label", { className: "inline-flex items-center gap-2 text-sm text-gray-700", children: [_jsx("input", { type: "checkbox", className: "rounded", checked: auto, onChange: (e) => setAuto(e.target.checked) }), "Auto refresh (5s)"] }), _jsx("button", { onClick: () => { refreshAll(); }, className: "button", children: "Refresh" }), _jsx("div", { className: "ml-auto text-xs text-gray-500", children: lastUpdated ? `Cập nhật lần cuối: ${new Date(lastUpdated).toLocaleTimeString()}` : 'Chưa có cập nhật' })] }), err && _jsx("div", { className: "text-red-600 text-sm mb-2", children: err }), loading ? (_jsx("div", { className: "text-gray-500", children: "Loading JetStream info..." })) : (_jsxs(_Fragment, { children: [hasPendingUpdate && (_jsxs("div", { className: "mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3", children: [_jsx("span", { children: "C\u00F3 d\u1EEF li\u1EC7u m\u1EDBi" }), _jsx("button", { className: "button", onClick: applyPendingUpdates, children: "C\u1EADp nh\u1EADt" })] })), _jsxs("div", { className: "grid grid-cols-[340px_1fr_1fr] gap-3", children: [_jsxs("div", { children: [_jsxs(Section, { title: "Streams", children: [_jsx("div", { className: "mb-2 flex items-center gap-2", children: _jsx("input", { className: "input w-full", placeholder: "Search by name or subject...", value: streamQuery, onChange: (e) => setStreamQuery(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false) }) }), _jsx("div", { className: "mb-2 flex items-center gap-2 text-xs text-gray-600", children: _jsxs("div", { className: "ml-auto flex items-center gap-2", children: [_jsxs("label", { className: "flex items-center gap-1", children: [_jsx("span", { children: "Status" }), _jsxs("select", { className: "input", value: statusFilter, onChange: (e) => setStatusFilter(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false), children: [_jsx("option", { value: "all", children: "All" }), _jsx("option", { value: "active", children: "Active" }), _jsx("option", { value: "warning", children: "Warning" }), _jsx("option", { value: "error", children: "Error" })] })] }), _jsxs("label", { className: "flex items-center gap-1", children: [_jsx("span", { children: "Sort" }), _jsxs("select", { className: "input", value: streamSort, onChange: (e) => setStreamSort(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false), children: [_jsx("option", { value: "name", children: "Name" }), _jsx("option", { value: "msgs", children: "Messages" }), _jsx("option", { value: "bytes", children: "Bytes" }), _jsx("option", { value: "util", children: "Utilization" })] })] })] }) }), _jsxs("div", { className: "text-xs text-gray-500 mb-1", children: ["Streams: ", displayStreams.length] }), _jsxs("div", { className: "max-h-96 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg", onMouseEnter: () => setPanelHovering(true), onMouseLeave: () => setPanelHovering(false), children: [displayStreams.map((s) => {
                                                         const cfg = s?.config || {};
                                                         const name = cfg.name;
                                                         const storage = cfg.storage;
@@ -271,8 +320,12 @@ export default function JetStream() {
                                                         const retention = cfg.retention;
                                                         const subjectsCount = Array.isArray(cfg.subjects) ? cfg.subjects.length : 0;
                                                         const st = streamStatus(s);
-                                                        return (_jsxs("div", { onClick: () => setSelectedStream(name), className: `px-3 py-2 cursor-pointer ${selectedStream === name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`, children: [_jsxs("div", { className: "font-medium flex items-center gap-2", children: [_jsx("span", { className: `inline-block w-2.5 h-2.5 rounded-full ${st.className}`, title: `Status: ${st.label}` }), _jsx("span", { children: name }), _jsx("span", { className: "text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-700", title: `Status: ${st.label}`, children: st.label })] }), _jsxs("div", { className: "mt-1 flex items-center gap-2 text-xs text-gray-700 flex-wrap", children: [_jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["storage: ", String(storage || '-')] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["replicas: ", String(replicas || 1)] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["retention: ", String(retention || '-')] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["subjects: ", subjectsCount] })] })] }, name));
-                                                    }), filteredStreams.length === 0 && _jsx("div", { className: "p-3 text-gray-500", children: "No streams" })] })] }), streamInfo && (_jsxs(Section, { title: "Consumers", children: [(consumers.length > 10) && (_jsx("div", { className: "mb-2 flex items-center gap-2", children: _jsx("input", { className: "input w-full", placeholder: "Search consumers...", value: consumerQuery, onChange: (e) => setConsumerQuery(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false) }) })), _jsxs("div", { className: "max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg", children: [filteredConsumers.map((c) => (_jsx("div", { onClick: () => setSelectedConsumer(c.name), className: `px-3 py-1.5 cursor-pointer ${selectedConsumer === c.name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`, children: c.name }, c.name))), filteredConsumers.length === 0 && _jsx("div", { className: "p-3 text-gray-500", children: "No consumers" })] })] }))] }), _jsxs("div", { onMouseEnter: () => setPanelHovering(true), onMouseLeave: () => setPanelHovering(false), children: [streamInfo && (_jsxs(Section, { title: "Stream Health", sticky: true, children: [_jsx(KeyVals, { items: [
+                                                        const used = Number(s?.state?.bytes || 0);
+                                                        const maxb = Number(cfg?.max_bytes || 0);
+                                                        const util = (isFinite(used) && isFinite(maxb) && maxb > 0) ? (used / maxb) * 100 : null;
+                                                        const utilBadge = util == null ? null : (_jsxs("span", { className: `inline-flex px-1.5 py-0.5 rounded text-white text-[10px] ${util >= 90 ? 'bg-red-600' : util >= 75 ? 'bg-yellow-600' : 'bg-green-600'}`, children: [util.toFixed(0), "%"] }));
+                                                        return (_jsxs("div", { onClick: () => setSelectedStream(name), className: `px-3 py-2 cursor-pointer border-b border-gray-100 dark:border-gray-800 ${selectedStream === name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`, children: [_jsxs("div", { className: "font-medium flex items-center gap-2", children: [_jsx("span", { className: `inline-block w-2.5 h-2.5 rounded-full ${st.className}`, title: `Status: ${st.label}` }), _jsx("span", { children: name }), _jsx("span", { className: "text-[10px] px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900 text-gray-700", title: `Status: ${st.label}`, children: st.label })] }), _jsxs("div", { className: "mt-1 flex items-center gap-2 text-[11px] text-gray-700 flex-wrap", children: [_jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["msgs: ", String(s?.state?.messages ?? '-')] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["bytes: ", fmtBytes(used)] }), _jsxs("span", { className: "inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["util: ", utilBadge || '-'] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["subjects: ", subjectsCount] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["replicas: ", String(replicas || 1)] }), _jsxs("span", { className: "inline-flex px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-900", children: ["storage: ", String(storage || '-')] })] })] }, name));
+                                                    }), displayStreams.length === 0 && _jsx("div", { className: "p-3 text-gray-500", children: "No streams" })] })] }), streamInfo && (_jsxs(Section, { title: "Consumers", children: [(consumers.length > 10) && (_jsx("div", { className: "mb-2 flex items-center gap-2", children: _jsx("input", { className: "input w-full", placeholder: "Search consumers...", value: consumerQuery, onChange: (e) => setConsumerQuery(e.target.value), onFocus: () => setInputFocused(true), onBlur: () => setInputFocused(false) }) })), _jsxs("div", { className: "max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg", children: [filteredConsumers.map((c) => (_jsx("div", { onClick: () => setSelectedConsumer(c.name), className: `px-3 py-1.5 cursor-pointer ${selectedConsumer === c.name ? 'bg-blue-50 dark:bg-gray-800' : 'hover:bg-gray-50 dark:hover:bg-gray-900'}`, children: c.name }, c.name))), filteredConsumers.length === 0 && _jsx("div", { className: "p-3 text-gray-500", children: "No consumers" })] })] }))] }), _jsxs("div", { onMouseEnter: () => setPanelHovering(true), onMouseLeave: () => setPanelHovering(false), children: [streamInfo && (_jsxs(Section, { title: "Stream Health", sticky: true, children: [_jsx(KeyVals, { items: [
                                                     ['Name', streamInfo?.config?.name],
                                                     ['Storage', streamInfo?.config?.storage],
                                                     ['Replicas', streamInfo?.cluster?.replicas?.length],
