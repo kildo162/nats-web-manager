@@ -1,0 +1,47 @@
+version: "3.9"
+services:
+  nats:
+    image: nats:2.10
+    command: ["-js", "-m", "8222", "-p", "4222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+  api:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      PORT: 4000
+      NATS_CLUSTERS: |
+        [
+          {
+            "key": "local-docker",
+            "label": "Local (docker)",
+            "natsUrl": "nats://nats:4222",
+            "monitorUrl": "http://nats:8222"
+          },
+          {
+            "key": "demo",
+            "label": "demo.nats.io",
+            "natsUrl": "nats://demo.nats.io:4222",
+            "monitorUrl": "http://demo.nats.io:8222"
+          }
+        ]
+    volumes:
+      - ./server:/app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "4000:4000"
+    depends_on:
+      - nats
+  web:
+    image: node:20-alpine
+    working_dir: /app
+    environment:
+      - VITE_API_BASE=http://localhost:4000
+    volumes:
+      - ./web:/app
+    command: sh -c "npm install && npm run dev -- --host --port 5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - api
