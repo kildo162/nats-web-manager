@@ -155,6 +155,50 @@ export default function JetStream() {
             </Section>
 
             {streamInfo && (
+              <Section title="Stream Health">
+                <KeyVals
+                  items={[
+                    ['Name', streamInfo?.config?.name],
+                    ['Storage', streamInfo?.config?.storage],
+                    ['Replicas', streamInfo?.cluster?.replicas?.length],
+                    ['Leader', streamInfo?.cluster?.leader],
+                    ['Bytes Used', fmtBytes(streamInfo?.state?.bytes)],
+                    ['Max Bytes', streamInfo?.config?.max_bytes ?? '-'],
+                    ['Utilization', fmtPct(streamInfo?.state?.bytes, streamInfo?.config?.max_bytes)],
+                    ['Msgs', streamInfo?.state?.messages],
+                    ['First Seq', streamInfo?.state?.first_seq],
+                    ['Last Seq', streamInfo?.state?.last_seq],
+                  ]}
+                />
+                {Array.isArray(streamInfo?.cluster?.replicas) && streamInfo.cluster.replicas.length > 0 && (
+                  <div className="mt-2">
+                    <div className="font-medium text-gray-700 mb-1">Replicas</div>
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-gray-600">
+                          <th className="text-left pr-4">Name</th>
+                          <th className="text-left pr-4">Current</th>
+                          <th className="text-left pr-4">Active (ms)</th>
+                          <th className="text-left pr-4">Lag</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {streamInfo.cluster.replicas.map((r: any) => (
+                          <tr key={r.name}>
+                            <td className="pr-4">{r.name}</td>
+                            <td className={`pr-4 ${r.current ? 'text-green-700' : 'text-red-700'}`}>{String(r.current)}</td>
+                            <td className="pr-4">{r.active}</td>
+                            <td className="pr-4">{r.lag}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Section>
+            )}
+
+            {streamInfo && (
               <Section title="Consumers">
                 <div className="max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
                   {consumers.map((c) => (
@@ -180,6 +224,7 @@ export default function JetStream() {
                   ['Peers', jsCluster?.cluster?.peers?.length],
                   ['Meta Leader', jsCluster?.meta?.leader],
                   ['Meta Nodes', jsCluster?.meta?.replicas?.length],
+                  ['Streams', streams?.length ?? 0],
                   ['Account', acct?.account_id || acct?.tier || '-'],
                 ]}
               />
@@ -198,6 +243,18 @@ export default function JetStream() {
 
             {consumerInfo && (
               <Section title={`Consumer: ${selectedConsumer}`}>
+                <KeyVals
+                  items={[
+                    ['Ack Pending', consumerInfo?.num_ack_pending],
+                    ['Redelivered', consumerInfo?.num_redelivered ?? consumerInfo?.num_redeliveries],
+                    ['Num Pending', consumerInfo?.num_pending],
+                    ['Max Ack Pending', consumerInfo?.config?.max_ack_pending ?? '-'],
+                    ['Inactive (s)', consumerInfo?.inactive_threshold],
+                    ['Ack Policy', consumerInfo?.config?.ack_policy],
+                    ['Replay Policy', consumerInfo?.config?.replay_policy],
+                    ['Deliver Policy', consumerInfo?.config?.deliver_policy],
+                  ]}
+                />
                 <Pre obj={consumerInfo} />
               </Section>
             )}
@@ -237,3 +294,19 @@ function Pre({ obj }: { obj: any }) {
 }
 
 // Tailwind styles used instead of inline styles
+
+function fmtBytes(x: any) {
+  const n = Number(x || 0)
+  if (!isFinite(n) || n <= 0) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function fmtPct(used: any, max: any) {
+  const u = Number(used || 0)
+  const m = Number(max || 0)
+  if (!isFinite(u) || u <= 0 || !isFinite(m) || m <= 0) return '-'
+  return `${((u / m) * 100).toFixed(1)}%`
+}

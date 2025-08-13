@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { getConnz, getGatewayz, getLeafz, getRoutez, getSubsz } from '../api'
 
 export default function Cluster() {
@@ -11,15 +11,30 @@ export default function Cluster() {
   const [loading, setLoading] = useState(true)
   const [auto, setAuto] = useState(true)
   const [intervalMs] = useState(5000)
+  const [sortKey, setSortKey] = useState<'pending_bytes' | 'in_bytes' | 'out_bytes' | 'in_msgs' | 'out_msgs'>('pending_bytes')
+  const [limit, setLimit] = useState<number>(10)
+
+  const hotConns = useMemo(() => {
+    try {
+      const arr = Array.isArray(connz?.connections) ? (connz.connections as any[]) : []
+      return arr
+        .slice()
+        .sort((a: any, b: any) => Number(b?.[sortKey] || 0) - Number(a?.[sortKey] || 0))
+        .slice(0, Math.max(1, Math.min(100, limit || 10)))
+    } catch {
+      return [] as any[]
+    }
+  }, [connz, sortKey, limit])
 
   const loadAll = async () => {
     try {
       setLoading(true)
+      const sortParam = sortKey === 'pending_bytes' ? 'pending' : (sortKey as string)
       const [r, g, l, c, s] = await Promise.all([
         getRoutez(),
         getGatewayz(),
         getLeafz(),
-        getConnz({}),
+        getConnz({ sort: sortParam, order: -1, limit: Math.max(1, Math.min(1000, limit || 10)) }),
         getSubsz({}),
       ])
       setRoutez(r)
@@ -68,18 +83,43 @@ export default function Cluster() {
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <Section title="Routes">
+            <div className="mb-2">Total: {routez?.num_routes ?? (routez?.routes?.length || 0)}</div>
             <SummaryList items={routez?.routes || []} label={(r: any) => `${r.remote_id} @ ${r.ip}:${r.port}`} />
             <Pre obj={routez} />
           </Section>
           <Section title="Gateways">
+            <div className="mb-2">Inbound: {gatewayz?.num_inbound ?? (gatewayz?.inbound?.length || 0)}, Outbound: {gatewayz?.num_outbound ?? (gatewayz?.outbound?.length || 0)}</div>
             <Pre obj={gatewayz} />
           </Section>
           <Section title="Leafnodes">
+            <div className="mb-2">Total: {leafz?.num_leafnodes ?? (leafz?.leafnodes?.length || 0)}</div>
             <Pre obj={leafz} />
           </Section>
           <Section title="Connections">
             <div className="mb-2">Total: {connz?.total || 0}</div>
             <Pre obj={connz} />
+          </Section>
+          <Section title="Hot Connections (by pending bytes)">
+            <div className="flex items-center gap-3 mb-2 text-sm">
+              <label className="flex items-center gap-2">
+                <span className="text-gray-600">Sort</span>
+                <select className="input" value={sortKey} onChange={(e) => setSortKey(e.target.value as any)}>
+                  <option value="pending_bytes">pending_bytes</option>
+                  <option value="in_msgs">in_msgs</option>
+                  <option value="out_msgs">out_msgs</option>
+                  <option value="in_bytes">in_bytes</option>
+                  <option value="out_bytes">out_bytes</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-2">
+                <span className="text-gray-600">Limit</span>
+                <input className="input w-20" type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(Number(e.target.value))} />
+              </label>
+            </div>
+            <SummaryList
+              items={hotConns}
+              label={(c: any) => formatConnSummary(c, sortKey)}
+            />
           </Section>
           <Section title="Subscriptions">
             <div className="mb-2">Total: {subsz?.num_subscriptions || 0}</div>
@@ -117,3 +157,23 @@ function SummaryList({ items, label }: { items: any[], label: (x: any) => string
 }
 
 // Tailwind styles used instead of inline styles
+
+function fmtBytes(n: number | undefined | null) {
+  const v = Number(n || 0)
+  if (!isFinite(v) || v <= 0) return '0 B'
+  if (v < 1024) return `${v} B`
+  if (v < 1024 * 1024) return `${(v / 1024).toFixed(1)} KB`
+  if (v < 1024 * 1024 * 1024) return `${(v / (1024 * 1024)).toFixed(1)} MB`
+  return `${(v / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}
+
+function formatConnSummary(c: any, sortKey: string) {
+  const id = `#${c?.cid ?? '?'}`
+  const where = `${(c?.name || c?.ip || '-')}:${c?.port ?? ''}`
+  const pending = `pending=${fmtBytes(c?.pending_bytes)}`
+  const msgs = `msgs[in=${c?.in_msgs ?? 0}, out=${c?.out_msgs ?? 0}]`
+  const bytes = `bytes[in=${fmtBytes(c?.in_bytes)}, out=${fmtBytes(c?.out_bytes)}]`
+  const subs = `subs=${c?.subscriptions ?? 0}`
+  const sortVal = `${sortKey}=${sortKey.includes('bytes') ? fmtBytes(c?.[sortKey]) : String(c?.[sortKey] ?? 0)}`
+  return `${id} ${where} ${pending} ${msgs} ${bytes} ${subs} (${sortVal})`
+}

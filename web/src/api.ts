@@ -20,6 +20,13 @@ function qsWithCluster(params: Record<string, any> = {}) {
   return qs ? `?${qs}` : ''
 }
 
+export async function getRtt() {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/rtt${qs}`)
+  if (!r.ok) throw new Error(`rtt ${r.status}`)
+  return r.json()
+}
+
 export async function getVarz(params: Record<string, any> = {}) {
   const qs = qsWithCluster(params)
   const r = await fetch(`${API_BASE}/api/monitor/varz${qs}`)

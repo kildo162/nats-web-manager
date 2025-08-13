@@ -1,26 +1,74 @@
-import React, { useEffect, useState } from 'react'
-import { getVarz, jsInfo } from '../api'
+import React, { useEffect, useRef, useState } from 'react'
+import { getRtt, getVarz, jsInfo } from '../api'
 
 export default function Overview() {
   const [varz, setVarz] = useState<any>(null)
   const [info, setInfo] = useState<any>(null)
+  const [rtt, setRtt] = useState<number | null>(null)
   const [err, setErr] = useState<string>('')
   const [auto, setAuto] = useState(true)
   const [intervalMs] = useState(5000)
+  const prevRef = useRef<{ t: number, in_msgs: number, out_msgs: number, in_bytes: number, out_bytes: number } | null>(null)
+  const [rates, setRates] = useState<{ inMsgs: number, outMsgs: number, inBytes: number, outBytes: number }>({ inMsgs: 0, outMsgs: 0, inBytes: 0, outBytes: 0 })
+  const rttHistRef = useRef<number[]>([])
+  const [rttStats, setRttStats] = useState<{ min: number, avg: number, max: number } | null>(null)
 
   const loadAll = async () => {
     try {
-      const [v, i] = await Promise.all([
+      const [v, i, r] = await Promise.all([
         getVarz(),
         jsInfo().catch(() => null),
+        getRtt().catch(() => ({ rttMs: null })),
       ])
       setVarz(v)
       setInfo(i)
+      const rttVal = r?.rttMs ?? null
+      setRtt(rttVal)
+      // keep short history of RTT to show min/avg/max
+      try {
+        if (typeof rttVal === 'number' && isFinite(rttVal)) {
+          const hist = rttHistRef.current
+          hist.push(rttVal)
+          if (hist.length > 12) hist.shift()
+          const min = Math.min(...hist)
+          const max = Math.max(...hist)
+          const avg = hist.reduce((a, b) => a + b, 0) / hist.length
+          setRttStats({ min, avg, max })
+        }
+      } catch {}
+      // compute throughput rates
+      try {
+        const now = Date.now()
+        const pm = Number(v?.in_msgs ?? 0)
+        const om = Number(v?.out_msgs ?? 0)
+        const pb = Number(v?.in_bytes ?? 0)
+        const ob = Number(v?.out_bytes ?? 0)
+        const prev = prevRef.current
+        if (prev && now > prev.t) {
+          const dt = (now - prev.t) / 1000
+          const dInM = Math.max(0, pm - prev.in_msgs)
+          const dOutM = Math.max(0, om - prev.out_msgs)
+          const dInB = Math.max(0, pb - prev.in_bytes)
+          const dOutB = Math.max(0, ob - prev.out_bytes)
+          setRates({
+            inMsgs: dInM / dt,
+            outMsgs: dOutM / dt,
+            inBytes: dInB / dt,
+            outBytes: dOutB / dt,
+          })
+        }
+        prevRef.current = { t: now, in_msgs: pm, out_msgs: om, in_bytes: pb, out_bytes: ob }
+      } catch {}
       setErr('')
     } catch (e: any) {
       // Clear stale data so user sees immediate change on cluster switch
       setVarz(null)
       setInfo(null)
+      setRtt(null)
+      prevRef.current = null
+      setRates({ inMsgs: 0, outMsgs: 0, inBytes: 0, outBytes: 0 })
+      rttHistRef.current = []
+      setRttStats(null)
       setErr(e?.message || 'failed to load')
     }
   }
@@ -58,6 +106,7 @@ export default function Overview() {
               <KV k="Host" v={varz.host} />
               <KV k="Ports" v={`client ${varz.port}, http ${varz.http_port}`} />
               <KV k="JetStream" v={String(varz.jetstream)} />
+              <KV k="Uptime" v={varz.uptime || '-'} />
             </Card>
             <Card title="Connections">
               <KV k="Num Conns" v={varz.connections} />
@@ -68,6 +117,30 @@ export default function Overview() {
               <KV k="CPU" v={varz.cpu} />
               <KV k="Mem" v={`${Math.round((varz.mem || 0)/1024/1024)} MB`} />
               <KV k="Cores" v={varz.cores} />
+            </Card>
+            <Card title="Health/Alerts">
+              <KV k="Slow Consumers" v={varz?.slow_consumers ?? 0} />
+              <KV k="Max Payload" v={fmtBytes(varz?.max_payload)} />
+              <KV k="Max Conns" v={varz?.max_connections ?? '-'} />
+              <KV k="Write Deadline" v={
+                typeof varz?.write_deadline === 'number' ? `${varz.write_deadline}s` : (varz?.write_deadline || '-')
+              } />
+            </Card>
+            <Card title="Latency">
+              <KV k="RTT" v={rtt == null ? '-' : fmtMs(rtt)} />
+              {rttStats && (
+                <>
+                  <KV k="RTT Min" v={fmtMs(rttStats.min)} />
+                  <KV k="RTT Avg" v={fmtMs(rttStats.avg)} />
+                  <KV k="RTT Max" v={fmtMs(rttStats.max)} />
+                </>
+              )}
+            </Card>
+            <Card title="Throughput (avg since last refresh)">
+              <KV k="In Msgs/s" v={fmtRate(rates.inMsgs)} />
+              <KV k="Out Msgs/s" v={fmtRate(rates.outMsgs)} />
+              <KV k="In KB/s" v={fmtRate(rates.inBytes / 1024)} />
+              <KV k="Out KB/s" v={fmtRate(rates.outBytes / 1024)} />
             </Card>
           </div>
         ) : (
@@ -106,3 +179,26 @@ function KV({ k, v }: { k: string; v: any }) {
 }
 
 // Tailwind styles used instead of inline styles
+
+function fmtRate(n: number) {
+  if (!isFinite(n) || n <= 0) return '0'
+  if (n >= 1000) return n.toFixed(0)
+  if (n >= 100) return n.toFixed(1)
+  return n.toFixed(2)
+}
+
+function fmtMs(n: number) {
+  if (!isFinite(n) || n < 0) return '-'
+  if (n < 1) return `${n.toFixed(2)} ms`
+  if (n < 10) return `${n.toFixed(1)} ms`
+  return `${Math.round(n)} ms`
+}
+
+function fmtBytes(x: any) {
+  const n = Number(x || 0)
+  if (!isFinite(n) || n <= 0) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  return `${(n / (1024 * 1024 * 1024)).toFixed(1)} GB`
+}

@@ -15,6 +15,18 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, time: new Date().toISOString() });
 });
 
+// Round-trip time to NATS for quick latency insight
+app.get('/api/rtt', async (req, res) => {
+  try {
+    const clusterKey = typeof req.query.cluster === 'string' ? String(req.query.cluster) : undefined;
+    const nc = await getNcFor(clusterKey);
+    const rtt = await nc.rtt();
+    res.json({ rttMs: rtt });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'rtt error' });
+  }
+});
+
 // List configured clusters (labels and monitor URLs)
 app.get('/api/clusters', (_req, res) => {
   res.json(listClusters());

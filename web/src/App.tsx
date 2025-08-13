@@ -4,7 +4,8 @@ import PubSub from './pages/PubSub'
 import Streams from './pages/Streams'
 import Cluster from './pages/Cluster'
 import JetStream from './pages/JetStream'
-import { getClusters, setCluster as apiSetCluster } from './api'
+import Advisories from './pages/Advisories'
+import { getClusters, getRtt, getVarz, setCluster as apiSetCluster } from './api'
 
 const tabs = [
   { key: 'overview', label: 'Overview' },
@@ -12,6 +13,7 @@ const tabs = [
   { key: 'streams', label: 'Streams' },
   { key: 'cluster', label: 'Cluster' },
   { key: 'jetstream', label: 'JetStream' },
+  { key: 'advisories', label: 'Advisories' },
 ] as const
 
 export default function App() {
@@ -22,6 +24,11 @@ export default function App() {
   const [clErr, setClErr] = useState('')
   const [dark, setDark] = useState(false)
   const initRef = useRef(false)
+  const [showClusterMenu, setShowClusterMenu] = useState(false)
+  const menuRef = useRef<HTMLDivElement | null>(null)
+  const [natsOk, setNatsOk] = useState<boolean | null>(null)
+  const [monitorOk, setMonitorOk] = useState<boolean | null>(null)
+  const [statusMsg, setStatusMsg] = useState<string>('')
 
   useEffect(() => {
     let alive = true
@@ -75,6 +82,49 @@ export default function App() {
     localStorage.setItem('theme', dark ? 'dark' : 'light')
   }, [dark])
 
+  // Close cluster menu on outside click
+  useEffect(() => {
+    function onDocClick(e: MouseEvent) {
+      if (!showClusterMenu) return
+      const t = e.target as Node
+      if (menuRef.current && !menuRef.current.contains(t)) {
+        setShowClusterMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [showClusterMenu])
+
+  // Check NATS and monitor connectivity for current cluster
+  useEffect(() => {
+    let alive = true
+    async function checkOnce() {
+      try {
+        // NATS RTT
+        await getRtt()
+        if (!alive) return
+        setNatsOk(true)
+      } catch (e: any) {
+        if (!alive) return
+        setNatsOk(false)
+        setStatusMsg(e?.message || 'NATS check failed')
+      }
+      try {
+        // Monitor varz
+        await getVarz()
+        if (!alive) return
+        setMonitorOk(true)
+      } catch (e: any) {
+        if (!alive) return
+        setMonitorOk(false)
+      }
+    }
+    // initial and periodic checks
+    checkOnce()
+    const t = setInterval(checkOnce, 10000)
+    return () => { alive = false; clearInterval(t) }
+  }, [cluster])
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
       <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
@@ -83,22 +133,56 @@ export default function App() {
             <h1 className="m-0 text-2xl font-semibold text-gray-800">NATS Web Manager</h1>
             <div className="text-sm text-gray-500">API: {apiBase}</div>
           </div>
-          <div className="flex items-center gap-2">
-            <label htmlFor="cluster" className="text-sm text-gray-700">Cluster</label>
-            <select
-              id="cluster"
-              value={cluster}
-              onChange={(e) => { const k = e.target.value; try { console.debug('[app] select change ->', k) } catch {}; setCluster(k); localStorage.setItem('clusterKey', k) }}
-              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-brand"
+          <div className="flex items-center gap-2 relative" ref={menuRef}>
+            <button
+              type="button"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand flex items-center gap-2"
+              onClick={() => setShowClusterMenu(v => !v)}
+              aria-haspopup="listbox"
+              aria-expanded={showClusterMenu}
             >
-              {clusters.map((c: { key: string; label: string; monitorUrl?: string }) => (
-                <option key={c.key} value={c.key}>{c.label}</option>
-              ))}
-            </select>
+              <span className="text-gray-700">Cluster:</span>
+              <span className="font-medium">{clusters.find(c => c.key === cluster)?.label || '-'}</span>
+              <span className="text-gray-500">▾</span>
+            </button>
+            {showClusterMenu && (
+              <div className="absolute right-28 top-12 z-20 w-72 bg-white border border-gray-200 rounded-md shadow-lg overflow-hidden">
+                <div className="max-h-80 overflow-auto">
+                  {clusters.map((c) => {
+                    const selected = c.key === cluster
+                    return (
+                      <button
+                        key={c.key}
+                        className={`w-full text-left px-3 py-2 text-sm flex items-start gap-2 hover:bg-gray-50 ${selected ? 'bg-gray-100' : ''}`}
+                        onClick={() => { setCluster(c.key); localStorage.setItem('clusterKey', c.key); setShowClusterMenu(false) }}
+                      >
+                        <span className={`mt-0.5 inline-block w-4 h-4 rounded-sm border ${selected ? 'bg-brand border-brand' : 'border-gray-300'}`}></span>
+                        <span className="flex-1">
+                          <div className="font-medium text-gray-800">{c.label}</div>
+                          {c.monitorUrl && <div className="text-xs text-gray-500 truncate">{c.monitorUrl}</div>}
+                        </span>
+                      </button>
+                    )
+                  })}
+                  {clusters.length === 0 && (
+                    <div className="px-3 py-2 text-sm text-gray-500">No clusters configured</div>
+                  )}
+                </div>
+              </div>
+            )}
+            {/* Status badges */}
+            <div className={`text-xs px-2 py-1 rounded ${natsOk === false ? 'bg-red-100 text-red-700' : natsOk ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{natsOk === null ? 'NATS …' : natsOk ? 'NATS OK' : 'NATS error'}</div>
+            <div className={`text-xs px-2 py-1 rounded ${monitorOk === false ? 'bg-yellow-100 text-yellow-800' : monitorOk ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'}`}>{monitorOk === null ? 'Monitor …' : monitorOk ? 'Monitor OK' : 'Monitor unavailable'}</div>
             <button className="button" onClick={() => setDark(v => !v)} aria-label="Toggle dark mode">{dark ? '🌙' : '☀️'}</button>
           </div>
         </div>
-        {clErr && <div className="container-px pb-2 text-sm text-red-600">{clErr}</div>}
+        {(clErr || natsOk === false || monitorOk === false) && (
+          <div className="container-px pb-2 text-sm">
+            {clErr && <div className="text-red-600">{clErr}</div>}
+            {natsOk === false && <div className="text-red-600">Cannot reach NATS for this cluster. {statusMsg && `(${statusMsg})`}</div>}
+            {monitorOk === false && <div className="text-yellow-700">Monitor endpoints (8222) are not reachable for this cluster. Some data (varz/connz/etc) will be unavailable.</div>}
+          </div>
+        )}
       </header>
 
       <div className="container-px">
@@ -124,6 +208,7 @@ export default function App() {
         {tab === 'streams' && <Streams />}
         {tab === 'cluster' && <Cluster />}
         {tab === 'jetstream' && <JetStream />}
+        {tab === 'advisories' && <Advisories />}
       </main>
     </div>
   )

@@ -15,7 +15,7 @@ function loadClusters(): ClusterConfig[] {
       const arr = JSON.parse(raw)
       if (Array.isArray(arr)) {
         return arr.map((c, idx) => ({
-          key: String(c.key ?? idx === 0 ? 'default' : `c${idx}`),
+          key: String(c.key ?? (idx === 0 ? 'default' : `c${idx}`)),
           label: String(c.label ?? c.key ?? `Cluster ${idx + 1}`),
           natsUrl: String(c.natsUrl ?? c.NATS_URL ?? ''),
           monitorUrl: String(c.monitorUrl ?? c.NATS_MONITOR_URL ?? ''),
