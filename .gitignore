@@ -1,0 +1,62 @@
+############################
+# Root ignores for project #
+############################
+
+# Node dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+server/dist/
+web/dist/
+
+# TypeScript
+*.tsbuildinfo
+
+# Env files (keep examples)
+.env
+.env.*
+!.env.example
+!server/.env.example
+!web/.env.example
+
+# Logs
+logs
+*.log
+logs/**/*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Caches
+.cache/
+.eslintcache
+.parcel-cache/
+
+# IDE/OS files
+.DS_Store
+Thumbs.db
+
+# VSCode - keep common project files
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# Misc
+tmp/
+temp/
+*.swp
+*.swo
+*.local
+*.pem
+*.key
+*.crt
