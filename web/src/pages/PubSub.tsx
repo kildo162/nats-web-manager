@@ -51,7 +51,7 @@ export default function PubSub() {
           <input
             value={pubSubject}
             onChange={e => setPubSubject(e.target.value)}
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button onClick={doPublish} className="button-primary">Publish</button>
           <span className={pubResp.startsWith('Error') ? 'text-red-600 text-sm' : 'text-green-600 text-sm'}>{pubResp}</span>
@@ -60,7 +60,7 @@ export default function PubSub() {
           value={payload}
           onChange={e => setPayload(e.target.value)}
           rows={6}
-          className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+          className="w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
         />
       </section>
 
@@ -71,7 +71,7 @@ export default function PubSub() {
           <input
             value={subSubject}
             onChange={e => setSubSubject(e.target.value)}
-            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand"
+            className="flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
           />
           <button onClick={toggleSub} className="button">{active ? 'Stop' : 'Start'}</button>
         </div>

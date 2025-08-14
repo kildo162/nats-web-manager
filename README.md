@@ -61,4 +61,29 @@ npm run dev
   - Account, cluster, stream, and consumer details
 - Controls
   - Auto-refresh (5s) toggle and manual refresh button on Overview/Cluster
+## Prometheus Metrics
+
+- Backend exposes Prometheus metrics at `GET /metrics`.
+- Docker Compose includes Prometheus and Grafana:
+  - Prometheus: http://localhost:9090
+  - Grafana: http://localhost:3000 (default login `admin`/`admin`)
+- Prometheus config: `prometheus/prometheus.yml` (scrapes API at `localhost:4000`).
+
+Quick start (monitoring only):
+```bash
+docker compose up -d prometheus grafana
+```
+
+## JetStream Management (optional, gated)
+
+Management endpoints are disabled by default for safety. Enable by setting:
+```bash
+export ENABLE_JS_MANAGEMENT=1
+```
+Then restart the API.
+
+Available endpoints (dangerous; prefer on secured networks with auth):
+- Streams: `POST /api/js/streams`, `PUT /api/js/streams/:name`, `DELETE /api/js/streams/:name`, `POST /api/js/streams/:name/purge`
+- Consumers: `POST /api/js/consumers/:stream`, `PUT /api/js/consumers/:stream/:name`, `DELETE /api/js/consumers/:stream/:name`
+
 # nats-web-manager

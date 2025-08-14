@@ -1,21 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react'
+import { Routes, Route, Navigate } from 'react-router-dom'
 import Overview from './pages/Overview'
 import PubSub from './pages/PubSub'
 import Cluster from './pages/Cluster'
 import JetStream from './pages/JetStream'
 import Advisories from './pages/Advisories'
+import Sidebar from './components/Sidebar'
 import { getClusters, getRtt, getVarz, setCluster as apiSetCluster } from './api'
 
-const tabs = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'pubsub', label: 'Pub/Sub' },
-  { key: 'cluster', label: 'Cluster' },
-  { key: 'jetstream', label: 'JetStream' },
-  { key: 'advisories', label: 'Advisories' },
-] as const
+// App shell uses a modern Sidebar + Header layout with route-based navigation
 
 export default function App() {
-  const [tab, setTab] = useState<(typeof tabs)[number]['key']>('overview')
   const apiBase = (import.meta as any).env?.VITE_API_BASE || 'http://localhost:4000'
   const [clusters, setClusters] = useState<Array<{ key: string; label: string; monitorUrl?: string }>>([])
   const [cluster, setCluster] = useState<string>('')
@@ -125,7 +120,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900">
-      <header className="sticky top-0 z-10 bg-white border-b border-gray-200">
+      <header className="sticky top-0 z-10 bg-white border-b border-gray-200 dark:bg-gray-950 dark:border-gray-800">
         <div className="container-px py-3 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <h1 className="m-0 text-2xl font-semibold text-gray-800">NATS Web Manager</h1>
@@ -134,7 +129,7 @@ export default function App() {
           <div className="flex items-center gap-2 relative" ref={menuRef}>
             <button
               type="button"
-              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand flex items-center gap-2"
+              className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-800 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 flex items-center gap-2"
               onClick={() => setShowClusterMenu(v => !v)}
               aria-haspopup="listbox"
               aria-expanded={showClusterMenu}
@@ -154,7 +149,7 @@ export default function App() {
                         className={`w-full text-left px-3 py-2 text-sm flex items-start gap-2 hover:bg-gray-50 ${selected ? 'bg-gray-100' : ''}`}
                         onClick={() => { setCluster(c.key); localStorage.setItem('clusterKey', c.key); setShowClusterMenu(false) }}
                       >
-                        <span className={`mt-0.5 inline-block w-4 h-4 rounded-sm border ${selected ? 'bg-brand border-brand' : 'border-gray-300'}`}></span>
+                        <span className={`mt-0.5 inline-block w-4 h-4 rounded-sm border ${selected ? 'bg-indigo-600 border-indigo-600' : 'border-gray-300'}`}></span>
                         <span className="flex-1">
                           <div className="font-medium text-gray-800">{c.label}</div>
                           {c.monitorUrl && <div className="text-xs text-gray-500 truncate">{c.monitorUrl}</div>}
@@ -184,29 +179,21 @@ export default function App() {
       </header>
 
       <div className="container-px">
-        <nav className="flex gap-2 mt-4">
-          {tabs.map(t => {
-            const active = tab === t.key
-            const base = 'px-3 py-2 rounded-md border text-sm transition-colors'
-            const cls = active
-              ? 'bg-brand text-white border-brand'
-              : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-            return (
-              <button key={t.key} onClick={() => setTab(t.key)} className={`${base} ${cls}`}>
-                {t.label}
-              </button>
-            )
-          })}
-        </nav>
+        <div className="flex gap-6">
+          <Sidebar />
+          <main key={cluster} className="flex-1 py-6">
+            <Routes>
+              <Route path="/" element={<Navigate to="/overview" replace />} />
+              <Route path="/overview" element={<Overview />} />
+              <Route path="/pubsub" element={<PubSub />} />
+              <Route path="/cluster" element={<Cluster />} />
+              <Route path="/jetstream" element={<JetStream />} />
+              <Route path="/advisories" element={<Advisories />} />
+              <Route path="*" element={<Navigate to="/overview" replace />} />
+            </Routes>
+          </main>
+        </div>
       </div>
-
-      <main key={cluster} className="container-px py-6">
-        {tab === 'overview' && <Overview />}
-        {tab === 'pubsub' && <PubSub />}
-        {tab === 'cluster' && <Cluster />}
-        {tab === 'jetstream' && <JetStream />}
-        {tab === 'advisories' && <Advisories />}
-      </main>
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { getJsz, jsInfo, jsStreams, jsStreamInfo, jsConsumers, jsConsumerInfo } from '../api'
+import { getJsz, jsInfo, jsStreams, jsStreamInfo, jsConsumers, jsConsumerInfo, jsGetMessage, jsStreamPurge, jsStreamDelete, jsConsumerDelete } from '../api'
 
 export default function JetStream() {
   const [jsz, setJsz] = useState<any>(null)
@@ -24,6 +24,14 @@ export default function JetStream() {
   const [consumerQuery, setConsumerQuery] = useState('')
   const [streamSort, setStreamSort] = useState<'name' | 'msgs' | 'bytes' | 'util'>('name')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'warning' | 'error'>('all')
+
+  // Message browsing state
+  const [msgSeq, setMsgSeq] = useState<string>('')
+  const [msgSubject, setMsgSubject] = useState<string>('')
+  const [msgFromSeq, setMsgFromSeq] = useState<number | null>(null)
+  const [msg, setMsg] = useState<any>(null)
+  const [msgLoading, setMsgLoading] = useState(false)
+  const [msgErr, setMsgErr] = useState('')
 
   const [lastUpdated, setLastUpdated] = useState<number | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
@@ -123,6 +131,13 @@ export default function JetStream() {
     })()
     return () => { mounted = false }
   }, [selectedStream, selectedConsumer])
+
+  // Clear message viewer when stream changes
+  useEffect(() => {
+    setMsg(null)
+    setMsgErr('')
+    setMsgFromSeq(null)
+  }, [selectedStream])
 
   const jsCluster = useMemo(() => jsz?.jetstream || jsz?.data || jsz, [jsz])
   const filteredStreams = useMemo(() => {
@@ -525,7 +540,37 @@ export default function JetStream() {
                   }}
                 />
                 <div className="mt-2">
-                  <button className="button" onClick={() => setShowStreamJSON(v => !v)}>{showStreamJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button className="button" onClick={() => setShowStreamJSON(v => !v)}>{showStreamJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                    <button
+                      className="button bg-red-600 hover:bg-red-700"
+                      onClick={async () => {
+                        if (!selectedStream) return
+                        if (!window.confirm(`Purge all messages in stream '${selectedStream}'?`)) return
+                        try {
+                          await jsStreamPurge(selectedStream)
+                          await refreshAll()
+                        } catch (e: any) {
+                          setErr(e?.message || 'purge failed')
+                        }
+                      }}
+                    >Purge Stream</button>
+                    <button
+                      className="button bg-red-700 hover:bg-red-800"
+                      onClick={async () => {
+                        if (!selectedStream) return
+                        if (!window.confirm(`Delete stream '${selectedStream}'? This cannot be undone.`)) return
+                        try {
+                          await jsStreamDelete(selectedStream)
+                          // reset selection and refresh
+                          setSelectedStream('')
+                          await refreshAll()
+                        } catch (e: any) {
+                          setErr(e?.message || 'delete stream failed')
+                        }
+                      }}
+                    >Delete Stream</button>
+                  </div>
                   {showStreamJSON && <div className="mt-2"><Pre obj={streamInfo} /></div>}
                 </div>
               </Section>
@@ -616,6 +661,23 @@ export default function JetStream() {
                 />
                 <div className="mt-2">
                   <button className="button" onClick={() => setShowConsumerJSON(v => !v)}>{showConsumerJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                  <button
+                    className="button bg-red-600 hover:bg-red-700 ml-2"
+                    onClick={async () => {
+                      if (!selectedStream || !selectedConsumer) return
+                      if (!window.confirm(`Delete consumer '${selectedConsumer}' on stream '${selectedStream}'?`)) return
+                      try {
+                        await jsConsumerDelete(selectedStream, selectedConsumer)
+                        // refresh consumers list
+                        const cs = await jsConsumers(selectedStream)
+                        setConsumers(cs)
+                        setSelectedConsumer(cs[0]?.name || '')
+                        setConsumerInfo(null)
+                      } catch (e: any) {
+                        setErr(e?.message || 'delete consumer failed')
+                      }
+                    }}
+                  >Delete Consumer</button>
                   {showConsumerJSON && <div className="mt-2"><Pre obj={consumerInfo} /></div>}
                 </div>
               </Section>
@@ -659,6 +721,101 @@ export default function JetStream() {
               <button className="button" onClick={() => setShowAcctJSON(v => !v)}>{showAcctJSON ? 'Hide JSON' : 'Show JSON'}</button>
               {showAcctJSON && <div className="mt-2"><Pre obj={acct} /></div>}
             </Section>
+
+            {streamInfo && (
+              <Section title="Messages">
+                <div className="flex items-end gap-2 flex-wrap">
+                  <label className="text-sm text-gray-700">
+                    <div className="mb-1">Sequence</div>
+                    <input className="input w-40" inputMode="numeric" placeholder="e.g. 1" value={msgSeq} onChange={(e) => setMsgSeq(e.target.value)} />
+                  </label>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      if (!selectedStream) return
+                      const n = Number(msgSeq)
+                      if (!Number.isFinite(n) || n <= 0) { setMsgErr('Invalid sequence'); return }
+                      try {
+                        setMsgLoading(true); setMsgErr('')
+                        const r = await jsGetMessage(selectedStream, { seq: n })
+                        setMsg(r)
+                        setMsgFromSeq(r?.meta?.seq ?? null)
+                      } catch (e: any) {
+                        setMsg(null); setMsgErr(e?.message || 'get message failed')
+                      } finally { setMsgLoading(false) }
+                    }}
+                  >Get by Seq</button>
+
+                  <div className="w-px h-8 bg-gray-200" />
+
+                  <label className="text-sm text-gray-700">
+                    <div className="mb-1">Subject</div>
+                    <input className="input w-64" placeholder="subject or wildcard" value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} />
+                  </label>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      if (!selectedStream || !msgSubject.trim()) return
+                      try {
+                        setMsgLoading(true); setMsgErr('')
+                        const r = await jsGetMessage(selectedStream, { last_by_subj: msgSubject.trim() })
+                        setMsg(r)
+                        setMsgFromSeq(r?.meta?.seq ?? null)
+                      } catch (e: any) {
+                        setMsg(null); setMsgErr(e?.message || 'get last message failed')
+                      } finally { setMsgLoading(false) }
+                    }}
+                  >Last by Subject</button>
+                  <button
+                    className="button"
+                    onClick={async () => {
+                      if (!selectedStream || !msgSubject.trim()) return
+                      try {
+                        setMsgLoading(true); setMsgErr('')
+                        const from = msgFromSeq && msgFromSeq > 0 ? msgFromSeq : undefined
+                        const r = await jsGetMessage(selectedStream, { next_by_subj: msgSubject.trim(), from })
+                        setMsg(r)
+                        setMsgFromSeq(r?.meta?.seq ?? null)
+                      } catch (e: any) {
+                        setMsg(null); setMsgErr(e?.message || 'get next message failed')
+                      } finally { setMsgLoading(false) }
+                    }}
+                  >Next by Subject</button>
+                </div>
+                <div className="mt-3">
+                  {msgLoading && <div className="text-gray-500 text-sm">Loading message...</div>}
+                  {msgErr && <div className="text-red-600 text-sm">{msgErr}</div>}
+                  {!msgLoading && !msgErr && msg && (
+                    <div className="space-y-2">
+                      <KeyVals
+                        items={[
+                          ['Seq', msg?.meta?.seq],
+                          ['Subject', msg?.meta?.subject],
+                          ['Time', msg?.meta?.time],
+                          ['Size', msg?.meta?.size],
+                        ]}
+                      />
+                      <div>
+                        <div className="font-medium text-gray-700 mb-1">Headers</div>
+                        <Pre obj={msg?.headers || {}} />
+                      </div>
+                      <div>
+                        <div className="font-medium text-gray-700 mb-1">Body</div>
+                        {msg?.json ? (
+                          <Pre obj={msg.json} />
+                        ) : msg?.data?.text ? (
+                          <pre className="bg-gray-900 text-gray-100 text-sm rounded-lg p-4 overflow-auto">{msg.data.text}</pre>
+                        ) : (
+                          <div className="text-sm text-gray-500">Binary data (base64):
+                            <div className="mt-1 break-all text-xs bg-gray-100 dark:bg-gray-900 p-2 rounded">{msg?.data?.base64 || '-'}</div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </Section>
+            )}
           </div>
           </div>
         </>

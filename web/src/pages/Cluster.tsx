@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { getConnz, getGatewayz, getLeafz, getRoutez, getSubsz, getVarz } from '../api'
 import AutoRefreshDialog from '../components/AutoRefreshDialog'
+import DataTable from '../components/DataTable'
+import type { ColumnDef } from '@tanstack/react-table'
 
 export default function Cluster() {
   const [routez, setRoutez] = useState<any>(null)
@@ -21,7 +23,6 @@ export default function Cluster() {
   const [limit, setLimit] = useState<number>(10)
   const [connQuery, setConnQuery] = useState('')
   const [accountFilter, setAccountFilter] = useState<string>('')
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const [showAllRoutes, setShowAllRoutes] = useState(false)
   const [showRoutesJSON, setShowRoutesJSON] = useState(false)
   const [showGatewayJSON, setShowGatewayJSON] = useState(false)
@@ -63,6 +64,58 @@ export default function Cluster() {
       return [] as any[]
     }
   }, [connz, sortKey, limit, connQuery, accountFilter])
+
+  const connColumns = useMemo<ColumnDef<any, any>[]>(() => [
+    {
+      header: 'CID',
+      accessorKey: 'cid',
+      cell: ({ row }) => <div>#{row.original?.cid}</div>,
+    },
+    {
+      header: 'Account',
+      accessorKey: 'account',
+      cell: ({ row }) => <div>{row.original?.account || '-'}</div>,
+    },
+    {
+      header: 'Pending',
+      accessorKey: 'pending_bytes',
+      cell: ({ row }) => <div className="text-right">{fmtBytes(row.original?.pending_bytes)}</div>,
+    },
+    {
+      header: 'Bytes (in/out)',
+      cell: ({ row }) => (
+        <div className="text-right">{fmtBytes(row.original?.in_bytes)}/{fmtBytes(row.original?.out_bytes)}</div>
+      ),
+    },
+    {
+      header: 'Msgs (in/out)',
+      cell: ({ row }) => (
+        <div className="text-right">{row.original?.in_msgs ?? 0}/{row.original?.out_msgs ?? 0}</div>
+      ),
+    },
+    {
+      header: 'Subs',
+      accessorKey: 'subscriptions',
+      cell: ({ row }) => <div className="text-right">{row.original?.subscriptions ?? 0}</div>,
+    },
+    {
+      header: 'Client',
+      cell: ({ row }) => <div>{(row.original?.name || row.original?.ip || '-')}{row.original?.port ? `:${row.original.port}` : ''}</div>,
+    },
+    {
+      header: 'Lang/Version',
+      cell: ({ row }) => <div>{[row.original?.lang, row.original?.version].filter(Boolean).join(' / ') || '-'}</div>,
+    },
+    {
+      header: 'TLS',
+      cell: ({ row }) => <div>{tlsSummary(row.original)}</div>,
+    },
+    {
+      header: 'Idle',
+      accessorKey: 'idle',
+      cell: ({ row }) => <div>{fmtIdle(row.original?.idle)}</div>,
+    },
+  ], [])
 
   const fetchAllData = async () => {
     const sortParam = sortKey === 'pending_bytes' ? 'pending' : (sortKey as string)
@@ -319,67 +372,35 @@ export default function Cluster() {
             </div>
             {hotConns?.length ? (
               <div className="overflow-auto" onMouseEnter={() => setPanelHovering(true)} onMouseLeave={() => setPanelHovering(false)}>
-                <table className="min-w-full text-sm">
-                  <thead>
-                    <tr className="text-gray-600">
-                      <th className="text-left pr-3">CID</th>
-                      <th className="text-left pr-3">Account</th>
-                      <th className="text-right pr-3">Pending</th>
-                      <th className="text-right pr-3">Bytes (in/out)</th>
-                      <th className="text-right pr-3">Msgs (in/out)</th>
-                      <th className="text-right pr-3">Subs</th>
-                      <th className="text-left pr-3">Client</th>
-                      <th className="text-left pr-3">Lang/Version</th>
-                      <th className="text-left pr-3">TLS</th>
-                      <th className="text-left pr-3">Idle</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {hotConns.map((c: any) => (
-                      <React.Fragment key={c.cid}>
-                        <tr className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900 cursor-pointer" onClick={() => setExpanded((prev) => ({ ...prev, [c.cid]: !prev[c.cid] }))}>
-                          <td className="pr-3">#{c?.cid}</td>
-                          <td className="pr-3">{c?.account || '-'}</td>
-                          <td className="pr-3 text-right">{fmtBytes(c?.pending_bytes)}</td>
-                          <td className="pr-3 text-right">{fmtBytes(c?.in_bytes)}/{fmtBytes(c?.out_bytes)}</td>
-                          <td className="pr-3 text-right">{c?.in_msgs ?? 0}/{c?.out_msgs ?? 0}</td>
-                          <td className="pr-3 text-right">{c?.subscriptions ?? 0}</td>
-                          <td className="pr-3">{(c?.name || c?.ip || '-')}{c?.port ? `:${c.port}` : ''}</td>
-                          <td className="pr-3">{[c?.lang, c?.version].filter(Boolean).join(' / ') || '-'}</td>
-                          <td className="pr-3">{tlsSummary(c)}</td>
-                          <td className="pr-3">{fmtIdle(c?.idle)}</td>
-                        </tr>
-                        {expanded[c.cid] && (
-                          <tr className="bg-gray-50 dark:bg-gray-900">
-                            <td className="p-3" colSpan={10}>
-                              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-800">
-                                <div>
-                                  <div className="font-medium mb-1">Client</div>
-                                  <div>Name: {c?.name || '-'}</div>
-                                  <div>IP: {c?.ip || '-'}{c?.port ? `:${c.port}` : ''}</div>
-                                  <div>Account: {c?.account || '-'}</div>
-                                </div>
-                                <div>
-                                  <div className="font-medium mb-1">TLS</div>
-                                  <div>Version: {c?.tls_version || c?.tls?.version || '-'}</div>
-                                  <div>Cipher: {c?.tls_cipher || c?.tls?.cipher || '-'}</div>
-                                  <div>Verified: {String(c?.tls_verified ?? c?.tls?.verified ?? '-')}</div>
-                                </div>
-                                <div>
-                                  <div className="font-medium mb-1">Stats</div>
-                                  <div>Pending: {fmtBytes(c?.pending_bytes)}</div>
-                                  <div>Msgs: in {c?.in_msgs ?? 0} / out {c?.out_msgs ?? 0}</div>
-                                  <div>Bytes: in {fmtBytes(c?.in_bytes)} / out {fmtBytes(c?.out_bytes)}</div>
-                                  <div>Subs: {c?.subscriptions ?? 0}</div>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </React.Fragment>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  columns={connColumns}
+                  data={hotConns}
+                  pageSize={Math.max(1, Math.min(100, limit || 10))}
+                  getRowId={(r: any) => String(r?.cid ?? Math.random())}
+                  renderDetail={(c: any) => (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm text-gray-800">
+                      <div>
+                        <div className="font-medium mb-1">Client</div>
+                        <div>Name: {c?.name || '-'}</div>
+                        <div>IP: {c?.ip || '-'}{c?.port ? `:${c.port}` : ''}</div>
+                        <div>Account: {c?.account || '-'}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium mb-1">TLS</div>
+                        <div>Version: {c?.tls_version || c?.tls?.version || '-'}</div>
+                        <div>Cipher: {c?.tls_cipher || c?.tls?.cipher || '-'}</div>
+                        <div>Verified: {String(c?.tls_verified ?? c?.tls?.verified ?? '-')}</div>
+                      </div>
+                      <div>
+                        <div className="font-medium mb-1">Stats</div>
+                        <div>Pending: {fmtBytes(c?.pending_bytes)}</div>
+                        <div>Msgs: in {c?.in_msgs ?? 0} / out {c?.out_msgs ?? 0}</div>
+                        <div>Bytes: in {fmtBytes(c?.in_bytes)} / out {fmtBytes(c?.out_bytes)}</div>
+                        <div>Subs: {c?.subscriptions ?? 0}</div>
+                      </div>
+                    </div>
+                  )}
+                />
               </div>
             ) : (
               <div className="text-gray-500">No matching connections</div>

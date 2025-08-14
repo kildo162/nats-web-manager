@@ -3,17 +3,10 @@ export default {
   darkMode: 'class',
   content: [
     './index.html',
-    './src/**/*.{ts,tsx}',
+    './src/**/*.{ts,tsx,js,jsx}',
   ],
   theme: {
-    extend: {
-      colors: {
-        brand: {
-          DEFAULT: '#2563eb',
-          dark: '#1d4ed8',
-        },
-      },
-    },
+    extend: {},
   },
   plugins: [],
 }

@@ -30,5 +30,18 @@ body {
 }
 
 .button-primary {
-  @apply inline-flex items-center justify-center rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark;
+  @apply inline-flex items-center justify-center rounded-md bg-indigo-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-indigo-700;
+}
+
+/* Polished inputs and badges */
+.input {
+  @apply h-8 rounded-md border border-gray-300 bg-white px-2 text-sm text-gray-800 placeholder-gray-400 shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none dark:bg-gray-800 dark:text-gray-100 dark:border-gray-700 dark:placeholder-gray-500;
+}
+
+.badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-700;
+}
+
+.muted {
+  @apply text-gray-500 dark:text-gray-400;
 }

@@ -76,6 +76,46 @@ export async function jsConsumerInfo(stream: string, name: string) {
   return r.json()
 }
 
+// JetStream message browsing and management
+export type JsMessageParams = {
+  seq?: number
+  last_by_subj?: string
+  next_by_subj?: string
+  from?: number
+}
+
+export async function jsGetMessage(stream: string, params: JsMessageParams) {
+  const qs = qsWithCluster(params as any)
+  const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}/message${qs}`)
+  if (!r.ok) throw new Error(`js/streams/${stream}/message ${r.status}`)
+  return r.json()
+}
+
+export async function jsStreamPurge(stream: string, opts: Record<string, any> = {}) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}/purge${qs}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts || {}),
+  })
+  if (!r.ok) throw new Error(`js/streams/${stream}/purge ${r.status}`)
+  return r.json()
+}
+
+export async function jsStreamDelete(stream: string) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}${qs}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`js/streams/${stream} ${r.status}`)
+  return r.json()
+}
+
+export async function jsConsumerDelete(stream: string, name: string) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`, { method: 'DELETE' })
+  if (!r.ok) throw new Error(`js/consumers/${stream}/${name} ${r.status}`)
+  return r.json()
+}
+
 export async function publish(subject: string, data: any) {
   const qs = qsWithCluster()
   const r = await fetch(`${API_BASE}/api/publish${qs}`, {
