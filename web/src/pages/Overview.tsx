@@ -128,7 +128,10 @@ export default function Overview() {
   return (
     <div>
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xl font-semibold text-gray-800">Overview</h2>
+        <div>
+          <h2 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">Overview</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Live status and key metrics for the selected cluster.</p>
+        </div>
         <div className="flex items-center gap-3">
           <label className="flex items-center gap-2 text-sm text-gray-700">
             <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
@@ -149,6 +152,44 @@ export default function Overview() {
       {(varzQuery.error || jsInfoQuery.error || rttQuery.error) && (
         <div className="text-red-600 text-sm mb-2">Failed to fetch some data.</div>
       )}
+
+      {/* Key Metrics */}
+      <section aria-label="Key metrics" className="mb-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">Active Conns</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{varz?.connections ?? '-'}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">RTT</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{rtt == null ? '-' : fmtMs(rtt)}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">In Msgs/s</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{fmtRate(rates.inMsgs)}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">Out Msgs/s</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{fmtRate(rates.outMsgs)}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">Memory</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{`${Math.round((varz?.mem || 0)/1024/1024)} MB`}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">CPU</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{varz?.cpu ?? '-'}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">Subscriptions</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{varz?.subscriptions ?? '-'}</div>
+          </div>
+          <div className="card p-3">
+            <div className="text-xs uppercase text-gray-500 mb-1">Routes</div>
+            <div className="text-xl font-semibold text-gray-900 dark:text-gray-100">{varz?.routes ?? '-'}</div>
+          </div>
+        </div>
+      </section>
       <section>
         <h3 className="text-base font-medium text-gray-700 mb-2">Server (varz)</h3>
         {varz ? (

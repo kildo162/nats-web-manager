@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
 import { JSONCodec, NatsConnection, Subscription } from 'nats';
-import { getMonitorBase, getNcFor, listClusters } from './clusters';
+import { getAllClusters, getMonitorBase, getNcFor, listClusters } from './clusters';
+import * as net from 'net';
 import client from 'prom-client';
 
 const app = express();
@@ -91,6 +92,70 @@ app.get('/api/rtt', async (req, res) => {
 // List configured clusters (labels and monitor URLs)
 app.get('/api/clusters', (_req, res) => {
   res.json(listClusters());
+});
+
+// Lightweight TCP dial to check NATS port availability quickly
+function checkTcp(host: string, port: number, timeoutMs = 700): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const socket = net.connect({ host, port });
+      const onOk = () => { try { socket.destroy(); } catch {} resolve(true); };
+      const onErr = () => { try { socket.destroy(); } catch {} resolve(false); };
+      socket.setTimeout(timeoutMs, onErr);
+      socket.once('connect', onOk);
+      socket.once('error', onErr);
+      socket.once('timeout', onErr);
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+async function checkMonitor(monitorUrl?: string, timeoutMs = 800): Promise<boolean> {
+  if (!monitorUrl) return false;
+  try {
+    const r = await axios.get(`${monitorUrl.replace(/\/?$/, '')}/healthz`, { timeout: timeoutMs });
+    return r.status >= 200 && r.status < 500; // healthz often 200, but treat non-timeout as reachable
+  } catch {
+    try {
+      const r2 = await axios.get(`${monitorUrl.replace(/\/?$/, '')}/varz`, { timeout: timeoutMs });
+      return r2.status >= 200 && r2.status < 500;
+    } catch {
+      return false;
+    }
+  }
+}
+
+function parseHostPort(natsUrl: string): { host: string; port: number } | null {
+  try {
+    // new URL supports nats://user:pass@host:port
+    const u = new URL(natsUrl);
+    const host = u.hostname;
+    const port = Number(u.port || 4222);
+    if (!host || !Number.isFinite(port)) return null;
+    return { host, port };
+  } catch {
+    return null;
+  }
+}
+
+// Status for all clusters (NATS TCP reachable, monitor reachable)
+app.get('/api/clusters/status', async (_req, res) => {
+  try {
+    const clusters = getAllClusters();
+    const checks = clusters.map(async (c) => {
+      const hp = parseHostPort(c.natsUrl);
+      const [natsOk, monitorOk] = await Promise.all([
+        hp ? checkTcp(hp.host, hp.port) : Promise.resolve(false),
+        checkMonitor(c.monitorUrl),
+      ]);
+      return { key: c.key, label: c.label, monitorUrl: c.monitorUrl, natsOk, monitorOk };
+    });
+    const results = await Promise.all(checks);
+    res.json(results);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'cluster status error' });
+  }
 });
 
 const allowedZ = new Set([
@@ -265,8 +330,8 @@ app.get('/api/js/consumers/:stream/:name', async (req, res) => {
   }
 });
 
-// Feature-gated JetStream management (Phase C)
-const ENABLE_JS_MANAGEMENT = process.env.ENABLE_JS_MANAGEMENT === '1';
+// JetStream management enabled by default (no env toggle required)
+const ENABLE_JS_MANAGEMENT = true;
 
 function guardMgmt(res: express.Response): boolean {
   if (!ENABLE_JS_MANAGEMENT) {

@@ -13,6 +13,12 @@ export async function getClusters() {
         throw new Error(`clusters ${r.status}`);
     return r.json();
 }
+export async function getClusterStatuses() {
+    const r = await fetch(`${API_BASE}/api/clusters/status`);
+    if (!r.ok)
+        throw new Error(`cluster status ${r.status}`);
+    return r.json();
+}
 function qsWithCluster(params = {}) {
     const merged = { ...params };
     if (CLUSTER)
@@ -78,6 +84,84 @@ export async function jsConsumerInfo(stream, name) {
     const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`);
     if (!r.ok)
         throw new Error(`js/consumers/${stream}/${name} ${r.status}`);
+    return r.json();
+}
+export async function jsGetMessage(stream, params) {
+    const qs = qsWithCluster(params);
+    const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}/message${qs}`);
+    if (!r.ok)
+        throw new Error(`js/streams/${stream}/message ${r.status}`);
+    return r.json();
+}
+export async function jsStreamPurge(stream, opts = {}) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}/purge${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(opts || {}),
+    });
+    if (!r.ok)
+        throw new Error(`js/streams/${stream}/purge ${r.status}`);
+    return r.json();
+}
+export async function jsStreamDelete(stream) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(stream)}${qs}`, { method: 'DELETE' });
+    if (!r.ok)
+        throw new Error(`js/streams/${stream} ${r.status}`);
+    return r.json();
+}
+export async function jsConsumerDelete(stream, name) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`, { method: 'DELETE' });
+    if (!r.ok)
+        throw new Error(`js/consumers/${stream}/${name} ${r.status}`);
+    return r.json();
+}
+// Streams: create & update
+export async function jsStreamCreate(cfg) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/streams${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg || {}),
+    });
+    if (!r.ok)
+        throw new Error(`js/streams create ${r.status}`);
+    return r.json();
+}
+export async function jsStreamUpdate(name, cfg) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(name)}${qs}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg || {}),
+    });
+    if (!r.ok)
+        throw new Error(`js/streams update ${name} ${r.status}`);
+    return r.json();
+}
+// Consumers: create & update
+export async function jsConsumerCreate(stream, cfg) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}${qs}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg || {}),
+    });
+    if (!r.ok)
+        throw new Error(`js/consumers create ${stream} ${r.status}`);
+    return r.json();
+}
+export async function jsConsumerUpdate(stream, name, cfg) {
+    const qs = qsWithCluster();
+    const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(cfg || {}),
+    });
+    if (!r.ok)
+        throw new Error(`js/consumers update ${stream}/${name} ${r.status}`);
     return r.json();
 }
 export async function publish(subject, data) {

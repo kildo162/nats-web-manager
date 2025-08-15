@@ -12,6 +12,12 @@ export async function getClusters() {
   return r.json()
 }
 
+export async function getClusterStatuses() {
+  const r = await fetch(`${API_BASE}/api/clusters/status`)
+  if (!r.ok) throw new Error(`cluster status ${r.status}`)
+  return r.json()
+}
+
 function qsWithCluster(params: Record<string, any> = {}) {
   const merged: Record<string, any> = { ...params }
   if (CLUSTER) merged.cluster = CLUSTER
@@ -113,6 +119,52 @@ export async function jsConsumerDelete(stream: string, name: string) {
   const qs = qsWithCluster()
   const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`, { method: 'DELETE' })
   if (!r.ok) throw new Error(`js/consumers/${stream}/${name} ${r.status}`)
+  return r.json()
+}
+
+// Streams: create & update
+export async function jsStreamCreate(cfg: Record<string, any>) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/streams${qs}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg || {}),
+  })
+  if (!r.ok) throw new Error(`js/streams create ${r.status}`)
+  return r.json()
+}
+
+export async function jsStreamUpdate(name: string, cfg: Record<string, any>) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/streams/${encodeURIComponent(name)}${qs}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg || {}),
+  })
+  if (!r.ok) throw new Error(`js/streams update ${name} ${r.status}`)
+  return r.json()
+}
+
+// Consumers: create & update
+export async function jsConsumerCreate(stream: string, cfg: Record<string, any>) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}${qs}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg || {}),
+  })
+  if (!r.ok) throw new Error(`js/consumers create ${stream} ${r.status}`)
+  return r.json()
+}
+
+export async function jsConsumerUpdate(stream: string, name: string, cfg: Record<string, any>) {
+  const qs = qsWithCluster()
+  const r = await fetch(`${API_BASE}/api/js/consumers/${encodeURIComponent(stream)}/${encodeURIComponent(name)}${qs}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(cfg || {}),
+  })
+  if (!r.ok) throw new Error(`js/consumers update ${stream}/${name} ${r.status}`)
   return r.json()
 }
 

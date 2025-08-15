@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { getJsz, jsInfo, jsStreams, jsStreamInfo, jsConsumers, jsConsumerInfo, jsGetMessage, jsStreamPurge, jsStreamDelete, jsConsumerDelete } from '../api'
+import { getJsz, jsInfo, jsStreams, jsStreamInfo, jsConsumers, jsConsumerInfo, jsGetMessage, jsStreamPurge, jsStreamDelete, jsConsumerDelete, jsStreamCreate, jsStreamUpdate, jsConsumerCreate, jsConsumerUpdate } from '../api'
 
 export default function JetStream() {
   const [jsz, setJsz] = useState<any>(null)
@@ -12,6 +12,15 @@ export default function JetStream() {
   const [consumerInfo, setConsumerInfo] = useState<any>(null)
   const [err, setErr] = useState('')
   const [loading, setLoading] = useState(true)
+  // CRUD modals state
+  const [showCreateStream, setShowCreateStream] = useState(false)
+  const [showEditStream, setShowEditStream] = useState(false)
+  const [streamJsonText, setStreamJsonText] = useState('')
+  const [streamModalErr, setStreamModalErr] = useState('')
+  const [showCreateConsumer, setShowCreateConsumer] = useState(false)
+  const [showEditConsumer, setShowEditConsumer] = useState(false)
+  const [consumerJsonText, setConsumerJsonText] = useState('')
+  const [consumerModalErr, setConsumerModalErr] = useState('')
   const [auto, setAuto] = useState(() => {
     try { return localStorage.getItem('js_auto') === '1' } catch { return false }
   })
@@ -302,7 +311,7 @@ export default function JetStream() {
           <input type="checkbox" className="rounded" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
           Auto refresh (5s)
         </label>
-        <button onClick={() => { refreshAll() }} className="button">Refresh</button>
+        <button onClick={() => { refreshAll() }} className="button-ghost">Refresh</button>
         <div className="ml-auto text-xs text-gray-500">
           {lastUpdated ? `Cập nhật lần cuối: ${new Date(lastUpdated).toLocaleTimeString()}` : 'Chưa có cập nhật'}
         </div>
@@ -315,7 +324,7 @@ export default function JetStream() {
           {hasPendingUpdate && (
             <div className="mb-2 p-2 rounded bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center gap-3">
               <span>Có dữ liệu mới</span>
-              <button className="button" onClick={applyPendingUpdates}>Cập nhật</button>
+              <button className="button-primary" onClick={applyPendingUpdates}>Cập nhật</button>
             </div>
           )}
           <div className="grid grid-cols-[340px_1fr_1fr] gap-3">
@@ -323,6 +332,23 @@ export default function JetStream() {
             <Section title="Streams">
               <div className="mb-2 flex items-center gap-2">
                 <input className="input w-full" placeholder="Search by name or subject..." value={streamQuery} onChange={(e) => setStreamQuery(e.target.value)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} />
+                <button
+                  className="button-primary ml-1"
+                  onClick={() => {
+                    setStreamModalErr('')
+                    // sensible defaults
+                    const tpl = {
+                      name: 'NEW_STREAM',
+                      subjects: ['demo.>'],
+                      retention: 'limits',
+                      storage: 'file',
+                      num_replicas: 1,
+                      max_bytes: 0
+                    }
+                    setStreamJsonText(JSON.stringify(tpl, null, 2))
+                    setShowCreateStream(true)
+                  }}
+                >New Stream</button>
               </div>
               <div className="mb-2 flex items-center gap-2 text-xs text-gray-600">
                 <div className="ml-auto flex items-center gap-2">
@@ -390,11 +416,28 @@ export default function JetStream() {
 
             {streamInfo && (
               <Section title="Consumers">
-                {(consumers.length > 10) && (
-                  <div className="mb-2 flex items-center gap-2">
+                <div className="mb-2 flex items-center gap-2">
+                  {consumers.length > 10 && (
                     <input className="input w-full" placeholder="Search consumers..." value={consumerQuery} onChange={(e) => setConsumerQuery(e.target.value)} onFocus={() => setInputFocused(true)} onBlur={() => setInputFocused(false)} />
-                  </div>
-                )}
+                  )}
+                  <button
+                    className="button-primary ml-auto"
+                    onClick={() => {
+                      setConsumerModalErr('')
+                      const tpl = {
+                        durable_name: 'NEW_CONSUMER',
+                        ack_policy: 'explicit',
+                        deliver_policy: 'all',
+                        replay_policy: 'instant',
+                        max_ack_pending: 1000
+                      }
+                      setConsumerJsonText(JSON.stringify(tpl, null, 2))
+                      setShowCreateConsumer(true)
+                    }}
+                    disabled={!selectedStream}
+                    title={!selectedStream ? 'Select a stream first' : ''}
+                  >New Consumer</button>
+                </div>
                 <div className="max-h-60 overflow-auto border border-gray-200 dark:border-gray-800 rounded-lg">
                   {filteredConsumers.map((c) => (
                     <div
@@ -541,9 +584,18 @@ export default function JetStream() {
                 />
                 <div className="mt-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <button className="button" onClick={() => setShowStreamJSON(v => !v)}>{showStreamJSON ? 'Hide JSON' : 'Show JSON'}</button>
                     <button
-                      className="button bg-red-600 hover:bg-red-700"
+                      className="button-ghost"
+                      onClick={() => {
+                        if (!streamInfo?.config) return
+                        setStreamModalErr('')
+                        setStreamJsonText(JSON.stringify(streamInfo.config, null, 2))
+                        setShowEditStream(true)
+                      }}
+                    >Edit Stream</button>
+                    <button className="button-ghost" onClick={() => setShowStreamJSON(v => !v)}>{showStreamJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                    <button
+                      className="button-danger"
                       onClick={async () => {
                         if (!selectedStream) return
                         if (!window.confirm(`Purge all messages in stream '${selectedStream}'?`)) return
@@ -556,7 +608,7 @@ export default function JetStream() {
                       }}
                     >Purge Stream</button>
                     <button
-                      className="button bg-red-700 hover:bg-red-800"
+                      className="button-danger"
                       onClick={async () => {
                         if (!selectedStream) return
                         if (!window.confirm(`Delete stream '${selectedStream}'? This cannot be undone.`)) return
@@ -660,9 +712,19 @@ export default function JetStream() {
                   }}
                 />
                 <div className="mt-2">
-                  <button className="button" onClick={() => setShowConsumerJSON(v => !v)}>{showConsumerJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                  <button className="button-ghost" onClick={() => setShowConsumerJSON(v => !v)}>{showConsumerJSON ? 'Hide JSON' : 'Show JSON'}</button>
                   <button
-                    className="button bg-red-600 hover:bg-red-700 ml-2"
+                    className="button-ghost ml-2"
+                    onClick={() => {
+                      setConsumerModalErr('')
+                      // merge common fields to make it easy to edit
+                      const cfg = { durable_name: selectedConsumer, ...(consumerInfo?.config || {}) }
+                      setConsumerJsonText(JSON.stringify(cfg, null, 2))
+                      setShowEditConsumer(true)
+                    }}
+                  >Edit Consumer</button>
+                  <button
+                    className="button-danger ml-2"
                     onClick={async () => {
                       if (!selectedStream || !selectedConsumer) return
                       if (!window.confirm(`Delete consumer '${selectedConsumer}' on stream '${selectedStream}'?`)) return
@@ -711,14 +773,14 @@ export default function JetStream() {
                 }}
               />
               <div className="mt-2">
-                <button className="button" onClick={() => setShowJszJSON(v => !v)}>{showJszJSON ? 'Hide JSON' : 'Show JSON'}</button>
+                <button className="button-ghost" onClick={() => setShowJszJSON(v => !v)}>{showJszJSON ? 'Hide JSON' : 'Show JSON'}</button>
                 {showJszJSON && <div className="mt-2"><Pre obj={jsz} /></div>}
               </div>
             </Section>
 
             <Section title="Account">
               <div className="mb-2 text-sm text-gray-700">{acct?.account_id || acct?.tier || '-'}</div>
-              <button className="button" onClick={() => setShowAcctJSON(v => !v)}>{showAcctJSON ? 'Hide JSON' : 'Show JSON'}</button>
+              <button className="button-ghost" onClick={() => setShowAcctJSON(v => !v)}>{showAcctJSON ? 'Hide JSON' : 'Show JSON'}</button>
               {showAcctJSON && <div className="mt-2"><Pre obj={acct} /></div>}
             </Section>
 
@@ -730,7 +792,7 @@ export default function JetStream() {
                     <input className="input w-40" inputMode="numeric" placeholder="e.g. 1" value={msgSeq} onChange={(e) => setMsgSeq(e.target.value)} />
                   </label>
                   <button
-                    className="button"
+                    className="button-primary"
                     onClick={async () => {
                       if (!selectedStream) return
                       const n = Number(msgSeq)
@@ -753,7 +815,7 @@ export default function JetStream() {
                     <input className="input w-64" placeholder="subject or wildcard" value={msgSubject} onChange={(e) => setMsgSubject(e.target.value)} />
                   </label>
                   <button
-                    className="button"
+                    className="button-primary"
                     onClick={async () => {
                       if (!selectedStream || !msgSubject.trim()) return
                       try {
@@ -767,7 +829,7 @@ export default function JetStream() {
                     }}
                   >Last by Subject</button>
                   <button
-                    className="button"
+                    className="button-primary"
                     onClick={async () => {
                       if (!selectedStream || !msgSubject.trim()) return
                       try {
@@ -820,6 +882,118 @@ export default function JetStream() {
           </div>
         </>
       )}
+
+      {/* Stream Create Modal */}
+      {showCreateStream && (
+        <Modal title="Create Stream" onClose={() => setShowCreateStream(false)}>
+          {streamModalErr && <div className="text-red-600 text-sm mb-2">{streamModalErr}</div>}
+          <textarea className="input w-full h-64 font-mono" value={streamJsonText} onChange={(e) => setStreamJsonText(e.target.value)} />
+          <div className="mt-3 flex items-center gap-2 justify-end">
+            <button className="button-ghost" onClick={() => setShowCreateStream(false)}>Cancel</button>
+            <button
+              className="button-primary"
+              onClick={async () => {
+                try {
+                  setStreamModalErr('')
+                  const cfg = JSON.parse(streamJsonText || '{}')
+                  if (!cfg?.name) { setStreamModalErr('name is required'); return }
+                  await jsStreamCreate(cfg)
+                  setShowCreateStream(false)
+                  setSelectedStream(cfg.name)
+                  await refreshAll()
+                } catch (e: any) {
+                  setStreamModalErr(e?.message || 'create stream failed')
+                }
+              }}
+            >Create</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Stream Edit Modal */}
+      {showEditStream && (
+        <Modal title={`Edit Stream: ${selectedStream}`} onClose={() => setShowEditStream(false)}>
+          {streamModalErr && <div className="text-red-600 text-sm mb-2">{streamModalErr}</div>}
+          <textarea className="input w-full h-64 font-mono" value={streamJsonText} onChange={(e) => setStreamJsonText(e.target.value)} />
+          <div className="mt-3 flex items-center gap-2 justify-end">
+            <button className="button-ghost" onClick={() => setShowEditStream(false)}>Cancel</button>
+            <button
+              className="button-primary"
+              onClick={async () => {
+                if (!selectedStream) return
+                try {
+                  setStreamModalErr('')
+                  const cfg = JSON.parse(streamJsonText || '{}')
+                  await jsStreamUpdate(selectedStream, cfg)
+                  setShowEditStream(false)
+                  await refreshAll()
+                } catch (e: any) {
+                  setStreamModalErr(e?.message || 'update stream failed')
+                }
+              }}
+            >Save</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Consumer Create Modal */}
+      {showCreateConsumer && (
+        <Modal title={`Create Consumer on ${selectedStream}`} onClose={() => setShowCreateConsumer(false)}>
+          {consumerModalErr && <div className="text-red-600 text-sm mb-2">{consumerModalErr}</div>}
+          <textarea className="input w-full h-64 font-mono" value={consumerJsonText} onChange={(e) => setConsumerJsonText(e.target.value)} />
+          <div className="mt-3 flex items-center gap-2 justify-end">
+            <button className="button-ghost" onClick={() => setShowCreateConsumer(false)}>Cancel</button>
+            <button
+              className="button-primary"
+              onClick={async () => {
+                if (!selectedStream) return
+                try {
+                  setConsumerModalErr('')
+                  const cfg = JSON.parse(consumerJsonText || '{}')
+                  const r = await jsConsumerCreate(selectedStream, cfg)
+                  setShowCreateConsumer(false)
+                  // refresh consumers list
+                  const cs = await jsConsumers(selectedStream)
+                  setConsumers(cs)
+                  const newName = r?.name || r?.config?.durable_name || cfg?.durable_name || ''
+                  setSelectedConsumer(newName || (cs[0]?.name || ''))
+                  await refreshAll()
+                } catch (e: any) {
+                  setConsumerModalErr(e?.message || 'create consumer failed')
+                }
+              }}
+            >Create</button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Consumer Edit Modal */}
+      {showEditConsumer && (
+        <Modal title={`Edit Consumer: ${selectedConsumer}`} onClose={() => setShowEditConsumer(false)}>
+          {consumerModalErr && <div className="text-red-600 text-sm mb-2">{consumerModalErr}</div>}
+          <textarea className="input w-full h-64 font-mono" value={consumerJsonText} onChange={(e) => setConsumerJsonText(e.target.value)} />
+          <div className="mt-3 flex items-center gap-2 justify-end">
+            <button className="button-ghost" onClick={() => setShowEditConsumer(false)}>Cancel</button>
+            <button
+              className="button-primary"
+              onClick={async () => {
+                if (!selectedStream || !selectedConsumer) return
+                try {
+                  setConsumerModalErr('')
+                  const cfg = JSON.parse(consumerJsonText || '{}')
+                  await jsConsumerUpdate(selectedStream, selectedConsumer, cfg)
+                  setShowEditConsumer(false)
+                  // refresh consumer info
+                  const ci = await jsConsumerInfo(selectedStream, selectedConsumer)
+                  setConsumerInfo(ci)
+                } catch (e: any) {
+                  setConsumerModalErr(e?.message || 'update consumer failed')
+                }
+              }}
+            >Save</button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -859,6 +1033,23 @@ function KeyVals({ items, tips, links }: { items: [string, any][], tips?: Record
 function Pre({ obj }: { obj: any }) {
   if (!obj) return <div>-</div>
   return <pre className="bg-gray-900 text-gray-100 text-sm rounded-lg p-4 overflow-auto">{JSON.stringify(obj, null, 2)}</pre>
+}
+
+function Modal({ title, children, onClose }: { title: string, children: React.ReactNode, onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose}></div>
+      <div className="relative bg-white dark:bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg shadow-xl w-full max-w-3xl mx-3">
+        <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800 font-semibold flex items-center justify-between">
+          <div>{title}</div>
+          <button className="text-sm text-gray-500 hover:text-gray-800" onClick={onClose}>✕</button>
+        </div>
+        <div className="p-4">
+          {children}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // Tailwind styles used instead of inline styles

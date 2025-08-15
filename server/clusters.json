@@ -1,0 +1,56 @@
+[
+  {
+    "key": "local-docker",
+    "label": "Local (docker)",
+    "natsUrl": "nats://localhost:4222",
+    "monitorUrl": "http://localhost:8222"
+  },
+  {
+    "key": "local-docker-2",
+    "label": "Local 2 (docker)",
+    "natsUrl": "nats://localhost:4223",
+    "monitorUrl": "http://localhost:8223"
+  },
+  {
+    "key": "demo",
+    "label": "demo.nats.io",
+    "natsUrl": "nats://demo.nats.io:4222",
+    "monitorUrl": "http://demo.nats.io:8222"
+  },
+  {
+    "key": "ilv2-prod",
+    "label": "ILV2 PROD NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:14222",
+    "monitorUrl": "http://localhost:18222"
+  },
+  {
+    "key": "ilv2-staging",
+    "label": "ILV2 STAGING NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:24222",
+    "monitorUrl": "http://localhost:28222"
+  },
+  {
+    "key": "ilv2-dev",
+    "label": "ILV2 DEV NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:34222",
+    "monitorUrl": "http://localhost:38222"
+  },
+  {
+    "key": "op-vn-dev",
+    "label": "VF OP VN DEV NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:44222",
+    "monitorUrl": "http://localhost:48222"
+  },
+  {
+    "key": "op-vn-staging",
+    "label": "VF OP VN STAGING NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:54222",
+    "monitorUrl": "http://localhost:58222"
+  },
+  {
+    "key": "op-vn-prod",
+    "label": "VF OP VN PROD NATS CLUSTER (tunnel)",
+    "natsUrl": "nats://localhost:64222",
+    "monitorUrl": "http://localhost:68222"
+  }
+]

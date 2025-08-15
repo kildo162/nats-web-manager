@@ -16,4 +16,4 @@ const queryClient = new QueryClient({
     },
 });
 const root = createRoot(document.getElementById('root'));
-root.render(_jsx(React.StrictMode, { children: _jsx(BrowserRouter, { children: _jsxs(QueryClientProvider, { client: queryClient, children: [_jsx(App, {}), _jsx(ReactQueryDevtools, { initialIsOpen: false, position: "bottom-right" })] }) }) }));
+root.render(_jsx(React.StrictMode, { children: _jsx(BrowserRouter, { children: _jsxs(QueryClientProvider, { client: queryClient, children: [_jsx(App, {}), _jsx(ReactQueryDevtools, { initialIsOpen: false })] }) }) }));
